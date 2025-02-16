@@ -167,4 +167,4 @@ Sergiu Savva
 
 ## Support
 
-For bugs and feature requests, please [open an issue](https://github.com/sergiu.savva/robust-axios-client/issues).
+For bugs and feature requests, please [open an issue](https://github.com/sergiusavva/robust-axios-client/issues).
