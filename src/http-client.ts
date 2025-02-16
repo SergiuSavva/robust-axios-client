@@ -8,6 +8,7 @@ import axios, {
 } from 'axios';
 import axiosRetry from 'axios-retry';
 import { HttpClientConfig, HttpError, LoggerInterface, TimeoutError, ValidationError } from './types';
+import { ConsoleLogger } from './logger/console';
 
 export class HttpClient {
   private axiosInstance: AxiosInstance;
@@ -15,17 +16,15 @@ export class HttpClient {
   private dryRun: boolean;
   private debug: boolean;
   private customErrorHandler?: (error: any) => Error;
-  private retryNonIdempotent: boolean;
 
   constructor(config: HttpClientConfig) {
     this.validateConfig(config);
 
     this.axiosInstance = axios.create(config);
-    this.logger = config.logger;
+    this.logger = config.logger ?? new ConsoleLogger();
     this.dryRun = config.dryRun ?? false;
     this.debug = config.debug ?? false;
     this.customErrorHandler = config.customErrorHandler;
-    this.retryNonIdempotent = config.retryNonIdempotent ?? false;
 
     if (config.retry) {
       const { shouldRetry, ...retryConfig } = config.retry;
@@ -44,7 +43,7 @@ export class HttpClient {
 
   private calculateRetryDelay(retryCount: number, error: AxiosError): number {
     if (error.response?.status === 429) {
-      const retryAfter = error.response.headers['retry-after'];
+      const retryAfter = error.response.headers['retry-after'] || 3;
       if (retryAfter) {
         return parseInt(retryAfter, 10) * 1000;
       }
@@ -57,13 +56,7 @@ export class HttpClient {
     const isNetworkOrIdempotent = axiosRetry.isNetworkOrIdempotentRequestError(error);
     const isServerError = status ? status >= 500 : false;
     const isRateLimited = status === 429;
-    const isNonIdempotent = !['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(
-      error.config?.method?.toUpperCase() || '',
-    );
 
-    if (this.retryNonIdempotent && isNonIdempotent) { // this is Kastil'
-      return isNetworkOrIdempotent || isServerError || isRateLimited;
-    }
     return isNetworkOrIdempotent || isServerError || isRateLimited;
   }
 
@@ -103,7 +96,6 @@ export class HttpClient {
       },
       async (error: AxiosError) => {
         this.logger?.error('Response Error:', error);
-        // await this.handleUnauthorizedIfNeeded(error);
         return Promise.reject(this.handleError(error));
       },
     );
@@ -112,6 +104,7 @@ export class HttpClient {
   private logRequest(config: AxiosRequestConfig): void {
     const safeConfig = this.sanitizeRequest(config);
     const message: Record<string, any> = {
+      baseURL: config.baseURL,
       method: config.method,
       url: config.url,
     };
@@ -129,6 +122,7 @@ export class HttpClient {
 
   private logResponse(response: AxiosResponse): void {
     const message: Record<string, any> = {
+      baseURL: response.config.baseURL,
       status: response.status,
     };
 

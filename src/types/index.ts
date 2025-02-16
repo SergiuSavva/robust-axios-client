@@ -21,7 +21,6 @@ export interface HttpClientConfig extends AxiosRequestConfig {
   dryRun?: boolean;
   debug?: boolean;
   customErrorHandler?: (error: any) => Error;
-  retryNonIdempotent?: boolean;
 }
 
 export class HttpError extends Error {
