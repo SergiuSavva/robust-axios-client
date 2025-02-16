@@ -1,0 +1,3 @@
+beforeAll(() => {
+  // Global test setup
+});
