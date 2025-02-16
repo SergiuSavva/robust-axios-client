@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    "rootDir": ".",
+    "noEmit": true,
+    "moduleResolution": "node" // Add this to match main config
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*"
+  ]
+}
