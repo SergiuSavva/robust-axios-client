@@ -4,18 +4,21 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/robust-axios-client.svg)](https://nodejs.org)
 
-A robust and feature-rich Axios client implementation with built-in retry mechanism, logging, error handling, and more.
+A robust and feature-rich Axios client implementation with advanced resilience patterns, including retries, circuit breaker, rate limiting, and more.
 
 ## Features
 
-- 🔄 Automatic retry mechanism with exponential backoff
-- 📝 Built-in logging system with customizable loggers
-- ⚠️ Sophisticated error handling
+- 🔄 Advanced retry mechanism with multiple backoff strategies
+- 🔌 Circuit breaker pattern to prevent cascading failures
+- 🚦 Rate limiting with token bucket algorithm
+- 📝 Comprehensive logging system with customizable loggers
+- ⚠️ Sophisticated error handling and categorization
 - 🔍 Debug mode for detailed request/response logging
-- 🏃 Dry run capability
+- 🏃 Dry run capability for testing
 - 🔒 Automatic sensitive data sanitization
-- 💪 TypeScript support
-- 📦 ESM and CommonJS support
+- 🎯 Request categorization for endpoint-specific behavior
+- 💪 Full TypeScript support
+- 📦 Complete Axios API compatibility
 
 ## Installation
 
@@ -26,9 +29,9 @@ npm install robust-axios-client
 ## Quick Start
 
 ```typescript
-import { HttpClient } from 'robust-axios-client';
+import RobustAxios from 'robust-axios-client';
 
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com',
 });
 
@@ -44,7 +47,7 @@ const user = await client.post('/users', { name: 'John Doe' });
 ### Basic Configuration
 
 ```typescript
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com', // Required
   debug: false,                       // Optional: enables detailed logging
   dryRun: false,                     // Optional: simulate requests without sending them
@@ -55,12 +58,46 @@ const client = new HttpClient({
 ### Retry Configuration
 
 ```typescript
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com',
   retry: {
-    retries: 3,                      // Number of retry attempts
-    shouldRetry: (error) => boolean, // Custom retry condition
-    retryDelay: (retryCount) => number, // Custom delay between retries
+    maxRetries: 3,                     // Number of retry attempts
+    retryCondition: (error) => boolean, // Custom retry condition
+    retryDelay: (retryCount, error) => number, // Custom delay between retries
+    backoffStrategy: 'exponential',    // 'exponential', 'linear', 'fibonacci', or 'custom'
+    customBackoff: (retryCount, error) => number, // Custom backoff function
+    timeoutStrategy: 'decay',         // 'reset', 'decay', or 'fixed'
+    timeoutMultiplier: 1.5            // Used with 'decay' strategy
+  }
+});
+```
+
+### Circuit Breaker Configuration
+
+```typescript
+const client = RobustAxios.create({
+  baseURL: 'https://api.example.com',
+  retry: {
+    circuitBreaker: {
+      failureThreshold: 5,           // Number of failures before opening circuit
+      resetTimeout: 60000,           // Time in ms before attempting half-open state
+      halfOpenMaxRequests: 3         // Max requests to allow in half-open state
+    },
+    onCircuitBreakerStateChange: (newState) => {
+      console.log(`Circuit breaker state changed to: ${newState}`);
+    }
+  }
+});
+```
+
+### Rate Limiting Configuration
+
+```typescript
+const client = RobustAxios.create({
+  baseURL: 'https://api.example.com',
+  rateLimit: {
+    maxRequests: 100,  // Maximum number of requests
+    windowMs: 60000,   // Time window in milliseconds (1 minute)
   }
 });
 ```
@@ -68,7 +105,7 @@ const client = new HttpClient({
 ### Custom Error Handler
 
 ```typescript
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com',
   customErrorHandler: (error) => {
     // Custom error handling logic
@@ -85,34 +122,69 @@ const client = new HttpClient({
 import { LoggerInterface } from 'robust-axios-client';
 
 class CustomLogger implements LoggerInterface {
-  info(message: string, data?: any): void {
-    console.log(message, data);
+  debug(message: string, ...args: unknown[]): void {
+    console.debug(message, ...args);
   }
-  
-  error(message: string, data?: any): void {
-    console.error(message, data);
+
+  info(message: string, ...args: unknown[]): void {
+    console.info(message, ...args);
   }
-  
-  debug(message: string, data?: any): void {
-    console.debug(message, data);
+
+  warn(message: string, ...args: unknown[]): void {
+    console.warn(message, ...args);
+  }
+
+  error(message: string, ...args: unknown[]): void {
+    console.error(message, ...args);
   }
 }
 
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com',
   logger: new CustomLogger(),
 });
 ```
 
-### Custom Retry Logic
+### Request Categorization
 
 ```typescript
-const client = new HttpClient({
+const client = RobustAxios.create({
   baseURL: 'https://api.example.com',
   retry: {
-    shouldRetry: (error) => {
-      const status = error.response?.status;
-      return status === 429 || status >= 500;
+    requestCategories: {
+      authEndpoints: {
+        matcher: (config) => config.url?.includes('/auth'),
+        settings: {
+          maxRetries: 1,
+          backoffStrategy: 'linear'
+        }
+      },
+      userEndpoints: {
+        matcher: (config) => config.url?.includes('/users'),
+        settings: {
+          maxRetries: 5,
+          backoffStrategy: 'exponential'
+        }
+      }
+    }
+  }
+});
+```
+
+### Event Hooks
+
+```typescript
+const client = RobustAxios.create({
+  baseURL: 'https://api.example.com',
+  retry: {
+    onRetry: (context) => {
+      console.log(`Retrying request. Attempt: ${context.retryCount}`);
+    },
+    onSuccess: (response, context) => {
+      console.log(`Request succeeded after ${context.retryCount} retries`);
+    },
+    onFailed: (error, context) => {
+      console.log(`Request failed after ${context.retryCount} retries`);
     }
   }
 });
@@ -120,38 +192,67 @@ const client = new HttpClient({
 
 ## API Reference
 
-### HttpClient Methods
+### RobustAxios Methods
 
-- `get(url: string, config?: AxiosRequestConfig)`
-- `post(url: string, data?: any, config?: AxiosRequestConfig)`
-- `put(url: string, data?: any, config?: AxiosRequestConfig)`
-- `patch(url: string, data?: any, config?: AxiosRequestConfig)`
-- `delete(url: string, config?: AxiosRequestConfig)`
+#### Static Methods
+- `create(config: RobustAxiosConfig): RobustAxios`
+- `request<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `get<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `patch<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `delete<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `head<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `options<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `getUri(config?: AxiosRequestConfig): string`
+- `all<T>(values: Array<T | Promise<T>>): Promise<T[]>`
+- `spread<T, R>(callback: (...args: T[]) => R): (array: T[]) => R`
+- `isCancel(value: unknown): boolean`
+- `isAxiosError(payload: unknown): payload is AxiosError`
+
+#### Instance Methods
+- `request<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `get<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `patch<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `delete<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `head<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `options<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
+- `getUri(config?: AxiosRequestConfig): string`
+- `getInstance(): AxiosInstance`
+- `setDefaultHeader(key: string, value: string): void`
+- `updateConfig(newConfig: AxiosRequestConfig): void`
+- `addRequestInterceptor(onFulfilled, onRejected?): number`
+- `addResponseInterceptor(onFulfilled, onRejected?): number`
+- `removeRequestInterceptor(interceptorId: number): void`
+- `removeResponseInterceptor(interceptorId: number): void`
 
 ### Configuration Options
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| baseURL | string | Yes | - | Base URL for the API |
+| baseURL | string | No | '' | Base URL for the API |
 | debug | boolean | No | false | Enable detailed logging |
 | dryRun | boolean | No | false | Simulate requests without sending |
 | logger | LoggerInterface | No | ConsoleLogger | Custom logger implementation |
-| retry | RetryConfig | No | - | Retry configuration |
-| customErrorHandler | Function | No | - | Custom error handler |
+| retry | RetryConfig | No | Default config | Retry configuration |
+| customErrorHandler | Function | No | Built-in handler | Custom error handler |
+| rateLimit | { maxRequests: number, windowMs: number } | No | undefined | Rate limiting configuration |
+| ...other AxiosRequestConfig options | various | No | Axios defaults | Any valid Axios request config |
 
 ## Error Handling
 
-The client automatically handles common HTTP errors and provides detailed error information:
+The client handles various error scenarios with dedicated error classes:
 
-- Network errors
-- Rate limiting (429)
-- Server errors (5xx)
-- Validation errors
-- Timeout errors
+- `HttpError` - For HTTP status errors with detailed response information
+- `TimeoutError` - For request timeouts (ECONNABORTED)
+- `RateLimitError` - When rate limit is exceeded
+- `ValidationError` - For validation errors
 
 ## TypeScript Support
 
-This library is written in TypeScript and includes type definitions out of the box.
+This library is written in TypeScript and includes comprehensive type definitions.
 
 ## Contributing
 

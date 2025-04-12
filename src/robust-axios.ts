@@ -37,28 +37,28 @@ export interface RetryConfig {
   maxRetries?: number;
   retryCondition?: (error: AxiosError) => boolean | Promise<boolean>;
   retryDelay?: (retryCount: number, error: AxiosError) => number;
-  
+
   // Enhanced timeout handling
   timeoutStrategy?: 'reset' | 'decay' | 'fixed';
   timeoutMultiplier?: number;
-  
+
   // Circuit breaker settings
   circuitBreaker?: {
     failureThreshold: number;
     resetTimeout: number;
     halfOpenMaxRequests: number;
   };
-  
+
   // Retry backoff strategies
   backoffStrategy?: 'exponential' | 'linear' | 'fibonacci' | 'custom';
   customBackoff?: (retryCount: number, error: AxiosError) => number;
-  
+
   // Event hooks
   onRetry?: (retryContext: RetryContext) => Promise<void> | void;
   onSuccess?: (response: AxiosResponse, retryContext: RetryContext) => void;
   onFailed?: (error: AxiosError, retryContext: RetryContext) => void;
   onCircuitBreakerStateChange?: (newState: CircuitBreakerState) => void;
-  
+
   // Request categorization
   requestCategories?: {
     [key: string]: {
@@ -75,6 +75,10 @@ export interface RobustAxiosConfig extends AxiosRequestConfig {
   dryRun?: boolean;
   debug?: boolean;
   customErrorHandler?: (error: unknown) => Error;
+  rateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+  };
 }
 
 // Error classes
@@ -103,6 +107,13 @@ export class TimeoutError extends Error {
   }
 }
 
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
 // Default logger implementation
 export class ConsoleLogger implements LoggerInterface {
   debug(message: string, ...args: unknown[]): void {
@@ -128,7 +139,7 @@ class CircuitBreaker {
   private failures: number = 0;
   private lastStateChange: number = Date.now();
   private requestCount: number = 0;
-  
+
   constructor(
     private readonly config: Required<RetryConfig>['circuitBreaker'],
     private readonly onStateChange?: (state: CircuitBreakerState) => void
@@ -251,7 +262,7 @@ export class RobustAxios {
   private circuitBreaker?: CircuitBreaker;
   private rateLimiter?: TokenBucketRateLimiter;
   private retryContexts: Map<string, RetryContext> = new Map();
-  
+
   // Static methods to match axios API
   public static create(config: RobustAxiosConfig): RobustAxios {
     return new RobustAxios(config);
@@ -329,7 +340,7 @@ export class RobustAxios {
     this.dryRun = config.dryRun ?? false;
     this.debug = config.debug ?? false;
     this.customErrorHandler = config.customErrorHandler;
-    
+
     // Initialize retry configuration with defaults
     this.retryConfig = {
       ...DEFAULT_RETRY_CONFIG,
@@ -345,8 +356,12 @@ export class RobustAxios {
     }
 
     // Initialize rate limiter if configured
-    if (config.retry?.requestCategories) {
-      // Add rate limiting logic here if needed
+    if (config.rateLimit) {
+      this.rateLimiter = new TokenBucketRateLimiter(
+        config.rateLimit.maxRequests,
+        config.rateLimit.windowMs
+      );
+      this.logger.debug('Rate limiter initialized', config.rateLimit);
     }
 
     this.setupInterceptors();
@@ -361,7 +376,13 @@ export class RobustAxios {
         if (this.circuitBreaker && !(await this.circuitBreaker.beforeRequest())) {
           throw new Error('Circuit breaker is open');
         }
-        
+
+        // Check rate limiter
+        if (this.rateLimiter && !(await this.rateLimiter.tryAcquire())) {
+          this.logger.warn('Rate limit exceeded, request rejected');
+          throw new RateLimitError('Rate limit exceeded');
+        }
+
         // Track request for retry context
         const requestId = this.generateRequestId(config);
         this.retryContexts.set(requestId, {
@@ -371,7 +392,7 @@ export class RobustAxios {
           requestConfig: config,
           category: this.determineRequestCategory(config)
         });
-        
+
         this.logRequest(config);
         return config;
       },
@@ -387,26 +408,26 @@ export class RobustAxios {
         // Record successful response
         const context = this.getRetryContext(response.config);
         this.logResponse(response);
-        
+
         if (this.circuitBreaker) {
           this.circuitBreaker.recordSuccess();
         }
-        
+
         if (context) {
           this.retryConfig.onSuccess?.(response, context);
         }
-        
+
         return response;
       },
       async (error: AxiosError) => {
         this.logger.error('Response Error:', error);
-        
+
         if (!error.config) {
           return Promise.reject(this.handleError(error));
         }
-        
+
         const context = this.getRetryContext(error.config);
-        
+
         if (!context) {
           return Promise.reject(this.handleError(error));
         }
@@ -427,7 +448,7 @@ export class RobustAxios {
         if (this.circuitBreaker) {
           this.circuitBreaker.recordFailure();
         }
-        
+
         this.retryConfig.onFailed?.(error, context);
         return Promise.reject(this.handleError(error));
       }
@@ -449,10 +470,10 @@ export class RobustAxios {
   // Retry execution
   private async performRetry(error: AxiosError, context: RetryContext): Promise<AxiosResponse> {
     context.retryCount++;
-    
+
     const delay = this.calculateRetryDelay(context, error);
     await this.retryConfig.onRetry?.(context);
-    
+
     // Apply timeout strategy if configured
     if (error.config?.timeout) {
       error.config.timeout = this.calculateNextTimeout(
@@ -566,17 +587,23 @@ export class RobustAxios {
   }
 
   // Error handling
-  private handleError(error: AxiosError): Error {
+  private handleError(error: AxiosError | Error): Error {
     if (this.customErrorHandler) {
       return this.customErrorHandler(error);
     }
 
-    if (error.code === 'ECONNABORTED') {
-      return new TimeoutError('Request timed out');
+    if (error instanceof RateLimitError) {
+      return error;
     }
 
-    if (error.response) {
-      return new HttpError(error.message, error.response.status, error.response);
+    if (error instanceof AxiosError) {
+      if (error.code === 'ECONNABORTED') {
+        return new TimeoutError('Request timed out');
+      }
+
+      if (error.response) {
+        return new HttpError(error.message, error.response.status, error.response);
+      }
     }
 
     return error;
