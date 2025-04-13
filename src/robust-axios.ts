@@ -7,6 +7,11 @@ import axios, {
   InternalAxiosRequestConfig
 } from 'axios';
 
+// Custom type guard for AxiosError
+function isAxiosError(error: unknown): error is AxiosError {
+  return axios.isAxiosError(error);
+}
+
 // Circuit breaker states
 type CircuitBreakerState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
@@ -79,6 +84,8 @@ export interface RobustAxiosConfig extends AxiosRequestConfig {
     maxRequests: number;
     windowMs: number;
   };
+  contextMaxAge?: number; // Maximum age for retry contexts in ms
+  contextThreshold?: number; // Maximum number of contexts before cleanup
 }
 
 // Error classes
@@ -111,6 +118,45 @@ export class RateLimitError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RateLimitError';
+  }
+}
+
+export class NetworkError extends Error {
+  constructor(
+    message: string,
+    public originalError?: Error
+  ) {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
+export class ServerError extends HttpError {
+  constructor(
+    message: string,
+    statusCode: number,
+    response?: AxiosResponse
+  ) {
+    super(message, statusCode, response);
+    this.name = 'ServerError';
+  }
+}
+
+export class ClientError extends HttpError {
+  constructor(
+    message: string,
+    statusCode: number,
+    response?: AxiosResponse
+  ) {
+    super(message, statusCode, response);
+    this.name = 'ClientError';
+  }
+}
+
+export class CancellationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CancellationError';
   }
 }
 
@@ -253,6 +299,9 @@ const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
 };
 
 export class RobustAxios {
+  //--------------------------------------------------------------------------
+  // Private Properties
+  //--------------------------------------------------------------------------
   private axiosInstance: AxiosInstance;
   private logger: LoggerInterface;
   private dryRun: boolean;
@@ -262,10 +311,25 @@ export class RobustAxios {
   private circuitBreaker?: CircuitBreaker;
   private rateLimiter?: TokenBucketRateLimiter;
   private retryContexts: Map<string, RetryContext> = new Map();
+  private readonly contextMaxAge: number = 3600000;
+  private readonly contextThreshold: number = 100; // Default to 100 contexts
 
-  // Static methods to match axios API
+  // Static reference to default instance for testing/cleanup
+  public static _defaultInstance: RobustAxios | null = null;
+
+  //--------------------------------------------------------------------------
+  // Static Methods
+  //--------------------------------------------------------------------------
   public static create(config: RobustAxiosConfig): RobustAxios {
     return new RobustAxios(config);
+  }
+
+  // Method to reset all static instances for testing
+  public static _resetForTesting(): void {
+    if (RobustAxios._defaultInstance) {
+      RobustAxios._defaultInstance.destroy();
+      RobustAxios._defaultInstance = null;
+    }
   }
 
   // Static methods that delegate to the default instance
@@ -333,13 +397,23 @@ export class RobustAxios {
     return defaultInstance.updateConfig(newConfig);
   }
 
-  // Constructor
+  //--------------------------------------------------------------------------
+  // Lifecycle Methods
+  //--------------------------------------------------------------------------
   constructor(config: RobustAxiosConfig) {
     this.axiosInstance = axios.create(config);
     this.logger = config.logger ?? new ConsoleLogger();
     this.dryRun = config.dryRun ?? false;
     this.debug = config.debug ?? false;
     this.customErrorHandler = config.customErrorHandler;
+    // Allow overriding the context max age
+    if (config.contextMaxAge !== undefined) {
+      this.contextMaxAge = config.contextMaxAge;
+    }
+    
+    if (config.contextThreshold !== undefined) {
+      this.contextThreshold = config.contextThreshold;
+    }
 
     // Initialize retry configuration with defaults
     this.retryConfig = {
@@ -367,282 +441,21 @@ export class RobustAxios {
     this.setupInterceptors();
   }
 
-  // Interceptor setup
-  private setupInterceptors(): void {
-    // Request interceptor
-    this.axiosInstance.interceptors.request.use(
-      async (config) => {
-        // Check circuit breaker state
-        if (this.circuitBreaker && !(await this.circuitBreaker.beforeRequest())) {
-          throw new Error('Circuit breaker is open');
-        }
-
-        // Check rate limiter
-        if (this.rateLimiter && !(await this.rateLimiter.tryAcquire())) {
-          this.logger.warn('Rate limit exceeded, request rejected');
-          throw new RateLimitError('Rate limit exceeded');
-        }
-
-        // Track request for retry context
-        const requestId = this.generateRequestId(config);
-        this.retryContexts.set(requestId, {
-          retryCount: 0,
-          startTime: Date.now(),
-          attempts: [],
-          requestConfig: config,
-          category: this.determineRequestCategory(config)
-        });
-
-        this.logRequest(config);
-        return config;
-      },
-      (error) => {
-        this.logger.error('Request Error:', error);
-        return Promise.reject(error);
-      }
-    );
-
-    // Response interceptor
-    this.axiosInstance.interceptors.response.use(
-      (response) => {
-        // Record successful response
-        const context = this.getRetryContext(response.config);
-        this.logResponse(response);
-
-        if (this.circuitBreaker) {
-          this.circuitBreaker.recordSuccess();
-        }
-
-        if (context) {
-          this.retryConfig.onSuccess?.(response, context);
-        }
-
-        return response;
-      },
-      async (error: AxiosError) => {
-        this.logger.error('Response Error:', error);
-
-        if (!error.config) {
-          return Promise.reject(this.handleError(error));
-        }
-
-        const context = this.getRetryContext(error.config);
-
-        if (!context) {
-          return Promise.reject(this.handleError(error));
-        }
-
-        // Record attempt
-        context.attempts.push({
-          timestamp: Date.now(),
-          error,
-          duration: Date.now() - context.startTime
-        });
-
-        // Determine if we should retry
-        if (await this.shouldRetry(error, context)) {
-          return this.performRetry(error, context);
-        }
-
-        // No more retries, record failure
-        if (this.circuitBreaker) {
-          this.circuitBreaker.recordFailure();
-        }
-
-        this.retryConfig.onFailed?.(error, context);
-        return Promise.reject(this.handleError(error));
-      }
-    );
+  public destroy(): void {
+    this.retryContexts.clear();
   }
 
-  // Retry decision logic
-  private async shouldRetry(error: AxiosError, context: RetryContext): Promise<boolean> {
-    const categorySettings = this.getCategorySettings(context.category);
-    const maxRetries = categorySettings?.maxRetries ?? this.retryConfig.maxRetries;
-    const retryCondition = categorySettings?.retryCondition ?? this.retryConfig.retryCondition;
-
-    return (
-      context.retryCount < maxRetries &&
-      (await Promise.resolve(retryCondition(error)))
-    );
-  }
-
-  // Retry execution
-  private async performRetry(error: AxiosError, context: RetryContext): Promise<AxiosResponse> {
-    context.retryCount++;
-
-    const delay = this.calculateRetryDelay(context, error);
-    await this.retryConfig.onRetry?.(context);
-
-    // Apply timeout strategy if configured
-    if (error.config?.timeout) {
-      error.config.timeout = this.calculateNextTimeout(
-        error.config.timeout,
-        context.retryCount
-      );
-    }
-
-    // Wait for the calculated delay
-    await new Promise(resolve => setTimeout(resolve, delay));
-
-    // Perform the retry
-    return this.axiosInstance(error.config!);
-  }
-
-  // Calculate retry delay based on strategy
-  private calculateRetryDelay(context: RetryContext, error: AxiosError): number {
-    const categorySettings = this.getCategorySettings(context.category);
-    const backoffStrategy = categorySettings?.backoffStrategy ?? this.retryConfig.backoffStrategy;
-    const customBackoff = categorySettings?.customBackoff ?? this.retryConfig.customBackoff;
-
-    switch (backoffStrategy) {
-      case 'exponential':
-        return Math.pow(2, context.retryCount) * 1000;
-      case 'linear':
-        return context.retryCount * 1000;
-      case 'fibonacci':
-        return this.calculateFibonacciDelay(context.retryCount);
-      case 'custom': {
-        return customBackoff(context.retryCount, error);
-      }
-      default:
-        return 1000;
-    }
-  }
-
-  // Calculate Fibonacci sequence value
-  private calculateFibonacciDelay(n: number): number {
-    const fibonacci = (num: number): number => {
-      if (num <= 1) return num;
-      return fibonacci(num - 1) + fibonacci(num - 2);
-    };
-    return fibonacci(n) * 1000;
-  }
-
-  // Calculate next timeout based on strategy
-  private calculateNextTimeout(currentTimeout: number, retryCount: number): number {
-    switch (this.retryConfig.timeoutStrategy) {
-      case 'reset':
-        return currentTimeout;
-      case 'decay':
-        return currentTimeout * Math.pow(this.retryConfig.timeoutMultiplier, retryCount);
-      case 'fixed':
-        return currentTimeout;
-      default:
-        return currentTimeout;
-    }
-  }
-
-  // Request sanitization for logging
-  private sanitizeRequest(config: AxiosRequestConfig): Record<string, unknown> {
-    const safeConfig = { ...config };
-    if (safeConfig.headers && typeof safeConfig.headers === 'object') {
-      const headers = safeConfig.headers as Record<string, unknown>;
-      if (headers['Authorization']) {
-        safeConfig.headers = {
-          ...safeConfig.headers,
-          Authorization: '***',
-        };
-      }
-    }
-    return safeConfig;
-  }
-
-  // Request logging
-  private logRequest(config: AxiosRequestConfig): void {
-    const safeConfig = this.sanitizeRequest(config);
-    const message: Record<string, unknown> = {
-      baseURL: config.baseURL,
-      method: config.method,
-      url: config.url,
-    };
-
-    this.logger.info('Request:', message);
-
-    if (this.debug) {
-      Object.assign(message, {
-        headers: safeConfig['headers'],
-        data: config.data,
-      });
-      this.logger.debug('Request:', message);
-    }
-  }
-
-  // Response logging
-  private logResponse(response: AxiosResponse): void {
-    const message: Record<string, unknown> = {
-      baseURL: response.config.baseURL,
-      status: response.status,
-    };
-
-    this.logger.info('Response:', message);
-
-    if (this.debug) {
-      Object.assign(message, {
-        headers: response.headers,
-        data: response.data,
-      });
-      this.logger.debug('Response:', message);
-    }
-  }
-
-  // Error handling
-  private handleError(error: AxiosError | Error): Error {
-    if (this.customErrorHandler) {
-      return this.customErrorHandler(error);
-    }
-
-    if (error instanceof RateLimitError) {
-      return error;
-    }
-
-    if (error instanceof AxiosError) {
-      if (error.code === 'ECONNABORTED') {
-        return new TimeoutError('Request timed out');
-      }
-
-      if (error.response) {
-        return new HttpError(error.message, error.response.status, error.response);
-      }
-    }
-
-    return error;
-  }
-
-  // Request ID generation for tracking
-  private generateRequestId(config: AxiosRequestConfig): string {
-    return `${config.method || 'unknown'}-${config.url || 'unknown'}-${Date.now()}`;
-  }
-
-  // Retrieve retry context
-  private getRetryContext(config?: AxiosRequestConfig): RetryContext | undefined {
-    if (!config) return undefined;
-    const requestId = this.generateRequestId(config);
-    return this.retryContexts.get(requestId);
-  }
-
-  // Request categorization
-  private determineRequestCategory(config: AxiosRequestConfig): string | undefined {
-    for (const [category, categoryConfig] of Object.entries(this.retryConfig.requestCategories)) {
-      if (categoryConfig.matcher(config)) {
-        return category;
-      }
-    }
-    return undefined;
-  }
-
-  // Get category-specific settings
-  private getCategorySettings(category: string | undefined): Partial<RetryConfig> | undefined {
-    if (!category) return undefined;
-    return this.retryConfig.requestCategories[category]?.settings;
-  }
-
-  // Public API methods
+  //--------------------------------------------------------------------------
+  // Primary Public API Methods
+  //--------------------------------------------------------------------------
   public getInstance(): AxiosInstance {
     return this.axiosInstance;
   }
 
-  // Request method (main method)
+  public getUri(config?: AxiosRequestConfig): string {
+    return this.axiosInstance.getUri(config);
+  }
+
   public async request<T = unknown>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
     if (this.dryRun) {
       this.logger.info('Dry run request:', config);
@@ -691,7 +504,9 @@ export class RobustAxios {
     return this.request<T>({ ...config, method: 'PATCH', url, data });
   }
 
-  // Configuration methods
+  //--------------------------------------------------------------------------
+  // Configuration Methods
+  //--------------------------------------------------------------------------
   public setDefaultHeader(key: string, value: string): void {
     this.axiosInstance.defaults.headers.common[key] = value;
   }
@@ -700,7 +515,9 @@ export class RobustAxios {
     Object.assign(this.axiosInstance.defaults, newConfig);
   }
 
-  // Interceptor management
+  //--------------------------------------------------------------------------
+  // Interceptor Management
+  //--------------------------------------------------------------------------
   public addRequestInterceptor(
     onFulfilled: (config: InternalAxiosRequestConfig) => InternalAxiosRequestConfig | Promise<InternalAxiosRequestConfig>,
     onRejected?: (error: unknown) => unknown,
@@ -723,9 +540,477 @@ export class RobustAxios {
     this.axiosInstance.interceptors.response.eject(interceptorId);
   }
 
-  // Aliases and methods to match axios API
-  public getUri(config?: AxiosRequestConfig): string {
-    return this.axiosInstance.getUri(config);
+  //--------------------------------------------------------------------------
+  // Private Implementation Methods
+  //--------------------------------------------------------------------------
+  private setupInterceptors(): void {
+    // Request interceptor
+    this.axiosInstance.interceptors.request.use(
+      async (config) => {
+        // Check circuit breaker state
+        if (this.circuitBreaker && !(await this.circuitBreaker.beforeRequest())) {
+          throw new Error('Circuit breaker is open');
+        }
+
+        // Check rate limiter
+        if (this.rateLimiter && !(await this.rateLimiter.tryAcquire())) {
+          this.logger.warn('Rate limit exceeded, request rejected');
+          throw new RateLimitError('Rate limit exceeded');
+        }
+
+        // Track request for retry context
+        const requestId = this.generateRequestId(config);
+        this.retryContexts.set(requestId, {
+          retryCount: 0,
+          startTime: Date.now(),
+          attempts: [],
+          requestConfig: config,
+          category: this.determineRequestCategory(config)
+        });
+
+        // Check if we need to clean up based on size threshold
+        if (this.retryContexts.size > this.contextThreshold) {
+          this.cleanupRetryContexts();
+        }
+
+        this.logRequest(config);
+        return config;
+      },
+      (error) => {
+        this.logger.error('Request Error:', error);
+        return Promise.reject(error);
+      }
+    );
+
+    // Response interceptor
+    this.axiosInstance.interceptors.response.use(
+      (response) => {
+        // Record successful response
+        const context = this.getRetryContext(response.config);
+        this.logResponse(response);
+
+        if (this.circuitBreaker) {
+          this.circuitBreaker.recordSuccess();
+        }
+
+        if (context) {
+          this.retryConfig.onSuccess?.(response, context);
+          // Clean up the context on success
+          this.removeRetryContext(response.config);
+        }
+
+        return response;
+      },
+      async (error: unknown) => {
+        this.logger.error('Response Error:', error);
+
+        // Check for cancellation
+        if (axios.isCancel(error)) {
+          const axiosError = error as { config?: AxiosRequestConfig };
+          this.logger.info('Request was cancelled', { url: axiosError.config?.url });
+          // Clean up the context if it exists
+          if (axiosError.config) {
+            this.removeRetryContext(axiosError.config);
+          }
+          return Promise.reject(new CancellationError('Request was cancelled'));
+        }
+
+        // Ensure error is an AxiosError before proceeding
+        if (!isAxiosError(error)) {
+          return Promise.reject(this.handleError(error instanceof Error ? error : new Error(String(error))));
+        }
+
+        if (!error.config) {
+          return Promise.reject(this.handleError(error));
+        }
+
+        const context = this.getRetryContext(error.config);
+
+        if (!context) {
+          return Promise.reject(this.handleError(error));
+        }
+
+        // Record attempt
+        context.attempts.push({
+          timestamp: Date.now(),
+          error,
+          duration: Date.now() - context.startTime
+        });
+
+        // Determine if we should retry
+        if (await this.shouldRetry(error, context)) {
+          return this.performRetry(error, context);
+        }
+
+        // No more retries, record failure
+        if (this.circuitBreaker) {
+          this.circuitBreaker.recordFailure();
+        }
+
+        this.retryConfig.onFailed?.(error, context);
+        // Clean up the context after we're done with it
+        this.removeRetryContext(error.config);
+        return Promise.reject(this.handleError(error));
+      }
+    );
+  }
+
+  private async shouldRetry(error: AxiosError, context: RetryContext): Promise<boolean> {
+    const categorySettings = this.getCategorySettings(context.category);
+    const maxRetries = categorySettings?.maxRetries ?? this.retryConfig.maxRetries;
+    const retryCondition = categorySettings?.retryCondition ?? this.retryConfig.retryCondition;
+
+    // Make sure we don't exceed max retries
+    if (context.retryCount >= maxRetries) {
+      return false;
+    }
+
+    // Run the retry condition check
+    try {
+      // Handle both synchronous and async conditions
+      const shouldRetry = await Promise.resolve(retryCondition(error));
+      return shouldRetry;
+    } catch (conditionError) {
+      // If the condition check fails, log it and don't retry
+      this.logger.error('Error in retry condition check:', conditionError);
+      return false;
+    }
+  }
+
+  private async performRetry(error: AxiosError, context: RetryContext): Promise<AxiosResponse> {
+    context.retryCount++;
+
+    const delay = this.calculateRetryDelay(context, error);
+    await this.retryConfig.onRetry?.(context);
+
+    // Apply timeout strategy if configured
+    if (error.config?.timeout) {
+      error.config.timeout = this.calculateNextTimeout(
+        error.config.timeout,
+        context.retryCount
+      );
+    }
+
+    // Ensure config exists before proceeding
+    if (!error.config) {
+      throw new Error('Request configuration is missing for retry');
+    }
+
+    const config = error.config;
+
+    // Check for cancellation before waiting
+    const cancelToken = config.cancelToken;
+    if (cancelToken?.reason) {
+      this.removeRetryContext(config);
+      throw new CancellationError('Request was cancelled during retry');
+    }
+
+    // Wait for the calculated delay
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        resolve();
+      }, delay);
+
+      // Handle cancellation during delay
+      if (cancelToken) {
+        cancelToken.promise.then(() => {
+          clearTimeout(timeoutId);
+          reject(new CancellationError('Request was cancelled during retry delay'));
+        }).catch(() => {
+          // Ignore errors in the cancellation promise
+        });
+      }
+    });
+
+    // Check again for cancellation after waiting
+    if (cancelToken?.reason) {
+      this.removeRetryContext(config);
+      throw new CancellationError('Request was cancelled after retry delay');
+    }
+
+    // Perform the retry
+    return this.axiosInstance(config);
+  }
+
+  //--------------------------------------------------------------------------
+  // Retry and Backoff Strategy Methods
+  //--------------------------------------------------------------------------
+  private calculateRetryDelay(context: RetryContext, error: AxiosError): number {
+    const categorySettings = this.getCategorySettings(context.category);
+    const backoffStrategy = categorySettings?.backoffStrategy ?? this.retryConfig.backoffStrategy;
+    const customBackoff = categorySettings?.customBackoff ?? this.retryConfig.customBackoff;
+
+    switch (backoffStrategy) {
+      case 'exponential':
+        return Math.pow(2, context.retryCount) * 1000;
+      case 'linear':
+        return context.retryCount * 1000;
+      case 'fibonacci':
+        return this.calculateFibonacciDelay(context.retryCount);
+      case 'custom': {
+        return customBackoff(context.retryCount, error);
+      }
+      default:
+        return 1000;
+    }
+  }
+
+  private calculateFibonacciDelay(n: number): number {
+    const fibonacci = (num: number): number => {
+      if (num <= 1) return num;
+      return fibonacci(num - 1) + fibonacci(num - 2);
+    };
+    return fibonacci(n) * 1000;
+  }
+
+  private calculateNextTimeout(currentTimeout: number, retryCount: number): number {
+    switch (this.retryConfig.timeoutStrategy) {
+      case 'reset':
+        return currentTimeout;
+      case 'decay':
+        return currentTimeout * Math.pow(this.retryConfig.timeoutMultiplier, retryCount);
+      case 'fixed':
+        return currentTimeout;
+      default:
+        return currentTimeout;
+    }
+  }
+
+  //--------------------------------------------------------------------------
+  // Error Handling Methods
+  //--------------------------------------------------------------------------
+  private handleError(error: AxiosError | Error): Error {
+    if (this.customErrorHandler) {
+      return this.customErrorHandler(error);
+    }
+
+    // Handle specific error types
+    if (error instanceof RateLimitError || 
+        error instanceof CancellationError) {
+      return error;
+    }
+
+    if (isAxiosError(error)) {
+      // Handle network errors (no response)
+      if (!error.response) {
+        if (error.code === 'ECONNABORTED') {
+          return new TimeoutError('Request timed out');
+        }
+        
+        if (error.code === 'ECONNREFUSED') {
+          return new NetworkError('Connection refused', error);
+        }
+        
+        if (error.code === 'ENOTFOUND') {
+          return new NetworkError('Host not found', error);
+        }
+        
+        return new NetworkError('Network error occurred', error);
+      }
+
+      // Handle response errors
+      const status = error.response.status;
+      
+      // Client errors (4xx)
+      if (status >= 400 && status < 500) {
+        if (status === 429) {
+          return new RateLimitError('Rate limit exceeded');
+        }
+        
+        if (status === 422) {
+          return new ValidationError(error.message);
+        }
+        
+        return new ClientError(error.message, status, error.response);
+      }
+      
+      // Server errors (5xx)
+      if (status >= 500) {
+        return new ServerError(error.message, status, error.response);
+      }
+      
+      // Fallback to generic HTTP error
+      return new HttpError(error.message, status, error.response);
+    }
+
+    // Unknown error type
+    return error;
+  }
+
+  //--------------------------------------------------------------------------
+  // Logging Methods
+  //--------------------------------------------------------------------------
+  private sanitizeRequest(config: AxiosRequestConfig): Record<string, unknown> {
+    const safeConfig = { ...config };
+    if (safeConfig.headers && typeof safeConfig.headers === 'object') {
+      const headers = safeConfig.headers as Record<string, unknown>;
+      if (headers['Authorization']) {
+        safeConfig.headers = {
+          ...safeConfig.headers,
+          Authorization: '***',
+        };
+      }
+    }
+    return safeConfig;
+  }
+
+  private logRequest(config: AxiosRequestConfig): void {
+    const safeConfig = this.sanitizeRequest(config);
+    const message: Record<string, unknown> = {
+      baseURL: config.baseURL,
+      method: config.method,
+      url: config.url,
+    };
+
+    this.logger.info('Request:', message);
+
+    if (this.debug) {
+      Object.assign(message, {
+        headers: safeConfig['headers'],
+        data: config.data,
+      });
+      this.logger.debug('Request:', message);
+    }
+  }
+
+  private logResponse(response: AxiosResponse): void {
+    const message: Record<string, unknown> = {
+      baseURL: response.config.baseURL,
+      status: response.status,
+    };
+
+    this.logger.info('Response:', message);
+
+    if (this.debug) {
+      Object.assign(message, {
+        headers: response.headers,
+        data: response.data,
+      });
+      this.logger.debug('Response:', message);
+    }
+  }
+
+  //--------------------------------------------------------------------------
+  // Context Management Methods
+  //--------------------------------------------------------------------------
+  private generateRequestId(config: AxiosRequestConfig): string {
+    if (!config) {
+      return `UNKNOWN-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    }
+
+    // Extract components with proper fallbacks
+    const method = config.method?.toUpperCase() || 'UNKNOWN';
+    const baseUrl = config.baseURL?.replace(/\/+$/, '') || '';
+    const path = config.url?.replace(/^\/+/, '') || 'unknown';
+    
+    // Normalize URL parts and combine them
+    const fullUri = baseUrl ? `${baseUrl}/${path}` : path;
+    
+    // Include params hash if present (helps differentiate GET requests to same endpoint)
+    let paramsComponent = '';
+    if (config.params) {
+      try {
+        const paramsString = JSON.stringify(config.params);
+        paramsComponent = `-${paramsString.length}-${paramsString.slice(0, 10).replace(/\W/g, '')}`;
+      } catch {
+        // Ignore if params cannot be stringified
+      }
+    }
+    
+    // Create a timestamp-based component for uniqueness
+    const timestamp = Date.now().toString(36);
+    const randomComponent = Math.random().toString(36).substring(2, 8);
+    
+    return `${method}-${fullUri}${paramsComponent}-${timestamp}${randomComponent}`;
+  }
+
+  private getRetryContext(config?: AxiosRequestConfig): RetryContext | undefined {
+    if (!config) return undefined;
+    
+    // Try to find the context by exact ID
+    const requestId = this.generateRequestId(config);
+    const context = this.retryContexts.get(requestId);
+    
+    // If found, return it
+    if (context) return context;
+    
+    // If not found by exact ID, look through all contexts
+    // This helps in tests where mocks might create slightly different configs
+    for (const ctx of this.retryContexts.values()) {
+      if (ctx.requestConfig.method === config.method && 
+          ctx.requestConfig.url === config.url) {
+        return ctx;
+      }
+    }
+    
+    return undefined;
+  }
+
+  private removeRetryContext(config?: AxiosRequestConfig): void {
+    if (!config) return;
+    const requestId = this.generateRequestId(config);
+    this.retryContexts.delete(requestId);
+  }
+
+  private cleanupRetryContexts(): void {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    // Step 1: Remove contexts that are too old
+    this.retryContexts.forEach((context, key) => {
+      if (now - context.startTime > this.contextMaxAge) {
+        expiredKeys.push(key);
+      }
+    });
+    
+    // Delete expired keys
+    expiredKeys.forEach(key => {
+      this.retryContexts.delete(key);
+    });
+    
+    // Step 2: If still above threshold, use FIFO to remove oldest contexts
+    if (this.retryContexts.size > this.contextThreshold) {
+      // Get all contexts with their keys and sort by startTime (oldest first)
+      const contextEntries = Array.from(this.retryContexts.entries())
+        .map(([key, context]) => ({ key, startTime: context.startTime }))
+        .sort((a, b) => a.startTime - b.startTime);
+      
+      // Calculate how many additional contexts we need to remove
+      const extraToRemove = this.retryContexts.size - this.contextThreshold;
+      
+      if (extraToRemove > 0) {
+        // Add the oldest keys to our expired keys list
+        const oldestKeys = contextEntries.slice(0, extraToRemove).map(entry => entry.key);
+        
+        // Delete these oldest contexts
+        oldestKeys.forEach(key => {
+          this.retryContexts.delete(key);
+        });
+        
+        this.logger.debug(`FIFO cleanup removing ${oldestKeys.length} oldest contexts`);
+      }
+    }
+    
+    if (expiredKeys.length > 0) {
+      this.logger.debug(`Cleaned up ${expiredKeys.length} expired contexts`);
+    }
+  }
+
+  //--------------------------------------------------------------------------
+  // Request Categorization Methods
+  //--------------------------------------------------------------------------
+  private determineRequestCategory(config: AxiosRequestConfig): string | undefined {
+    for (const [category, categoryConfig] of Object.entries(this.retryConfig.requestCategories)) {
+      if (categoryConfig.matcher(config)) {
+        return category;
+      }
+    }
+    return undefined;
+  }
+
+  private getCategorySettings(category: string | undefined): Partial<RetryConfig> | undefined {
+    if (!category) return undefined;
+    return this.retryConfig.requestCategories[category]?.settings;
   }
 }
 
@@ -733,6 +1018,9 @@ export class RobustAxios {
 const defaultInstance = new RobustAxios({
   baseURL: '',
 });
+
+// Store reference for testing/cleanup
+RobustAxios._defaultInstance = defaultInstance;
 
 // Add static methods to RobustAxios that delegate to the default instance
 RobustAxios.request = function <T = unknown>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
