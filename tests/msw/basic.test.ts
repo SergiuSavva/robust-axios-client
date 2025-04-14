@@ -191,4 +191,60 @@ describe('Robust Axios Client with MSW - Basic Tests', () => {
     const response = await client.get('/api/transform-test');
     expect(response.data).toEqual({ transformed: true, original: { key: 'value' } });
   });
+
+  test('should handle server recovery after initial failures', async () => {
+    let requestCount = 0;
+    const requestTimes: number[] = [];
+    const startTime = Date.now();
+    
+    server.use(
+      http.get('https://example.com/api/recovery', () => {
+        requestCount++;
+        requestTimes.push(Date.now() - startTime);
+        
+        // First 2 requests fail with 500
+        if (requestCount <= 2) {
+          return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+        }
+        
+        // Subsequent requests succeed with 200
+        return HttpResponse.json({ 
+          message: 'Recovered', 
+          count: requestCount,
+          processingTime: Date.now() - startTime
+        }, { status: 200 });
+      })
+    );
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      retry: {
+        maxRetries: 3,
+        retryDelay: () => 10 // Small delay for tests
+      }
+    });
+    
+    // First request should trigger retries and eventually succeed
+    console.time('recovery-test');
+    const response = await client.get('/api/recovery');
+    console.timeEnd('recovery-test');
+    
+    // Print timing details
+    console.log('Request times (ms):', requestTimes);
+    console.log('Total time (ms):', Date.now() - startTime);
+    console.log('Response time from server (ms):', (response.data as { processingTime: number }).processingTime);
+    
+    // Verify it succeeded after the server recovered
+    expect(response.status).toBe(200);
+    expect((response.data as { message: string }).message).toBe('Recovered');
+    expect((response.data as { count: number }).count).toBe(3); // Third request
+    
+    // Additional requests should succeed immediately
+    const beforeSecondRequest = Date.now();
+    const secondResponse = await client.get('/api/recovery');
+    console.log('Second request time (ms):', Date.now() - beforeSecondRequest);
+    
+    expect(secondResponse.status).toBe(200);
+    expect((secondResponse.data as { count: number }).count).toBe(4); // Fourth request
+  }, 10000); // Increase timeout to 10 seconds
 }); 
