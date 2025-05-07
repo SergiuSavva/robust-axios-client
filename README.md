@@ -1,6 +1,6 @@
 # robust-axios-client
 
-[![npm version](https://img.shields.io/npm/v/robust-axios-client/v1.0.4.svg)](https://www.npmjs.com/package/robust-axios-client)
+[![npm version](https://img.shields.io/npm/v/robust-axios-client/v1.0.3.svg)](https://www.npmjs.com/package/robust-axios-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/robust-axios-client.svg)](https://nodejs.org)
 
@@ -256,42 +256,62 @@ This library is written in TypeScript and includes comprehensive type definition
 
 ## Testing
 
-### E2E Testing with Fake API Service
+### E2E Testing with Mock Service Worker
 
-This library includes a fake API service for end-to-end testing without relying on external services. This is particularly useful for testing error handling, retry mechanisms, circuit breakers, and other resilience features.
+This library includes testing capabilities using [Mock Service Worker (MSW)](https://mswjs.io/) for end-to-end testing without relying on external services. This is particularly useful for testing error handling, retry mechanisms, circuit breakers, and other resilience features.
 
 ```typescript
-import { TestServer } from 'robust-axios-client/tests/helpers/test-server';
+import { setupServer } from 'msw/node';
+import { rest } from 'msw';
 import RobustAxios from 'robust-axios-client';
 
-// Start the test server
-const server = new TestServer();
-const baseURL = await server.start();
+// Set up the MSW server with custom handlers
+const handlers = [
+  // Simulate a server error
+  rest.get('/api/users', (req, res, ctx) => {
+    return res(ctx.status(500), ctx.json({ message: 'Server error' }));
+  }),
+  
+  // Simulate rate limiting
+  rest.get('/api/data', (req, res, ctx) => {
+    // Custom logic to implement rate limiting
+    const shouldLimit = /* your rate limiting logic */;
+    if (shouldLimit) {
+      return res(ctx.status(429), ctx.json({ message: 'Too many requests' }));
+    }
+    return res(ctx.json({ data: 'Success' }));
+  }),
+  
+  // Simulate slow responses
+  rest.get('/api/slow', (req, res, ctx) => {
+    return res(ctx.delay(3000), ctx.json({ data: 'Delayed response' }));
+  }),
+];
 
-// Create a client pointing to the test server
-const client = RobustAxios.create({ baseURL });
+// Create and configure the server
+const server = setupServer(...handlers);
 
-// Simulate a server error
-server.setFailurePattern('/api/users', 500);
+// Start the server before tests
+beforeAll(() => server.listen());
 
-// Simulate rate limiting
-server.setRateLimit('/api/data', 5, 10000);
+// Reset handlers after each test
+afterEach(() => server.resetHandlers());
 
-// Simulate slow responses
-server.setResponseDelay('/api/slow', 3000);
+// Clean up after all tests
+afterAll(() => server.close());
 
-// Make requests to test different scenarios
+// Create a client for testing
+const client = RobustAxios.create({ baseURL: 'http://localhost' });
+
+// Test example
 try {
   await client.get('/api/users');
 } catch (error) {
   // Handle server error
 }
-
-// Clean up when done
-await server.stop();
 ```
 
-For more detailed examples and documentation, see the [E2E Testing README](tests/e2e/README.md).
+For more detailed examples of testing, see the tests in the `tests/msw` directory of the repository.
 
 ## Contributing
 
