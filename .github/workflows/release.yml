@@ -40,7 +40,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          registry-url: 'https://registry.npmjs.org/'
           cache: 'npm'
           
       - name: Configure Git
@@ -131,6 +131,14 @@ jobs:
         run: git push --follow-tags
           
       - name: Publish to NPM
-        run: npm publish --provenance --access public --tag ${{ steps.npm_tag.outputs.tag }}
+        run: |
+          # Verify token before publishing
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is missing. Please add it to your repository secrets."
+            exit 1
+          fi
+          
+          echo "Publishing to NPM with tag: ${{ steps.npm_tag.outputs.tag }}"
+          npm publish --provenance --access public --tag ${{ steps.npm_tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
