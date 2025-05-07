@@ -21,6 +21,10 @@ on:
         description: 'Custom version (only used when version is "custom")'
         required: false
         type: string
+
+permissions:
+  contents: write
+  id-token: write
   
 jobs:
   release:
@@ -53,8 +57,8 @@ jobs:
       
       - name: Configure Git
         run: |
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
           
       - name: Set version
         id: set-version
@@ -69,8 +73,10 @@ jobs:
           else
             VERSION=$(npm version ${{ github.event.inputs.version }} --no-git-tag-version)
           fi
-          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
-          echo "New version: ${VERSION#v}"
+          # Remove 'v' prefix if present
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $VERSION"
       
       - name: Generate Changelog
         id: changelog
@@ -81,9 +87,13 @@ jobs:
       - name: Update README with version badge
         run: |
           VERSION=${{ steps.set-version.outputs.version }}
-          # Update version in README if needed
           if grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
-            echo "README already has version badge"
+            echo "Updating badge in README"
+            sed -i 's|img.shields.io/npm/v/robust-axios-client/[^)]*|img.shields.io/npm/v/robust-axios-client/v'${VERSION}'|g' README.md || \
+            sed -i 's|img.shields.io/npm/v/robust-axios-client|img.shields.io/npm/v/robust-axios-client/v'${VERSION}'|g' README.md
+          else
+            echo "Adding badge to README"
+            sed -i '1i\[![npm version](https://img.shields.io/npm/v/robust-axios-client/v'${VERSION}'.svg)](https://www.npmjs.com/package/robust-axios-client)\n' README.md
           fi
           
       - name: Commit changes
@@ -94,7 +104,9 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           
       - name: Push changes
-        run: git push && git push --tags
+        run: |
+          git push || (echo "Retrying with pull and rebase..." && git pull --rebase && git push)
+          git push --tags || (echo "Retrying tag push..." && git pull --tags && git push --tags)
         
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -111,6 +123,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Publish to NPM
-        run: npm publish
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 
