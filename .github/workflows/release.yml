@@ -29,16 +29,12 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.set-version.outputs.version }}
-      tag: ${{ steps.npm-tag.outputs.tag }}
-      publish_success: ${{ steps.npm-publish.outputs.publish_success }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,281 +43,94 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
           
-      - name: Install dependencies
-        run: npm ci
-        
-      - name: Run tests
-        run: npm test
-        continue-on-error: false
-        
-      - name: Run lint
-        run: npm run lint
-        continue-on-error: false
-        
-      - name: Build
-        run: npm run build
-        continue-on-error: false
-      
       - name: Configure Git
         run: |
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
           
-      - name: Set version
-        id: set-version
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run tests
+        run: npm test
+        
+      - name: Run lint
+        run: npm run lint
+        
+      - name: Build
+        run: npm run build
+          
+      - name: Update version
+        id: version
         run: |
-          # Get current version
-          CURRENT_VERSION=$(node -e "console.log(require('./package.json').version)")
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Update version
-          npm version ${{ github.event.inputs.version }} --no-git-tag-version --silent
-          
-          # Get new version
+          npm version ${{ github.event.inputs.version }} --no-git-tag-version
           VERSION=$(node -e "console.log(require('./package.json').version)")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "New version: $VERSION"
-      
-      - name: Check for existing tags
-        id: check-tags
-        run: |
-          if git tag | grep -q .; then
-            echo "has_tags=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_tags=false" >> $GITHUB_OUTPUT
-            echo "This is the first release of the package."
-          fi
-
-      - name: Generate Changelog
-        id: changelog
-        if: steps.check-tags.outputs.has_tags == 'true'
-        uses: mikepenz/release-changelog-builder-action@v4
-        with:
-          configurationFile: .github/changelog-configuration.json
-          outputFile: .github/CHANGELOG.md
-          fetchReleaseInformation: true
-          fetchReviewers: true
-          fetchReviews: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set default changelog for first release
-        if: steps.check-tags.outputs.has_tags == 'false'
-        run: |
-          echo 'CHANGELOG<<EOF' >> $GITHUB_OUTPUT
-          echo '## 🎉 First Release' >> $GITHUB_OUTPUT
-          echo 'Initial release of robust-axios-client package.' >> $GITHUB_OUTPUT
-          echo 'EOF' >> $GITHUB_OUTPUT
-        id: first-release-changelog
-
-      - name: Update README with version badge
-        run: |
-          VERSION=${{ steps.set-version.outputs.version }}
+          echo "Updated to version $VERSION"
           
-          # Check if README.md exists
-          if [ ! -f README.md ]; then
-            echo "Creating README.md with badge"
-            echo "# robust-axios-client" > README.md
-            echo "" >> README.md
-            echo "[![npm version](https://img.shields.io/npm/v/robust-axios-client/v${VERSION}.svg)](https://www.npmjs.com/package/robust-axios-client)" >> README.md
-            echo "" >> README.md
-            echo "A robust Axios client with circuit breaking, rate limiting, and retry capabilities." >> README.md
-          elif grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
-            echo "Updating existing badge in README"
-            # Try different patterns to match the badge
+      - name: Update README badge
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
             sed -i -E 's|img.shields.io/npm/v/robust-axios-client(/v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?)?|img.shields.io/npm/v/robust-axios-client/v'"${VERSION}"'|g' README.md
-          else
-            echo "Adding badge to README after title"
-            # Insert after the first line containing # (markdown title)
-            awk 'FNR==1{print} FNR==2{print "[![npm version](https://img.shields.io/npm/v/robust-axios-client/v'"${VERSION}"'.svg)](https://www.npmjs.com/package/robust-axios-client)\n"} FNR!=1 && FNR!=2{print}' README.md > README.md.tmp
-            mv README.md.tmp README.md
           fi
-          
-      - name: Resolve NPM tag
-        id: npm-tag
-        run: |
-          # Determine the NPM tag based on version or input
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            # Use user-provided tag if specified
-            NPM_TAG="${{ github.event.inputs.tag }}"
-          elif [[ "${{ steps.set-version.outputs.version }}" == *"-"* ]]; then
-            # Use 'beta' tag for pre-release versions (containing a hyphen)
-            NPM_TAG="beta"
-          else
-            # Default to 'latest' for regular releases
-            NPM_TAG="latest"
-          fi
-          
-          echo "Using NPM tag: $NPM_TAG"
-          echo "tag=$NPM_TAG" >> $GITHUB_OUTPUT
           
       - name: Commit changes
         run: |
-          VERSION=${{ steps.set-version.outputs.version }}
           git add package.json package-lock.json README.md
-          git commit -m "chore: release v${VERSION}" || echo "No changes to commit"
-          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git commit -m "chore: release v${{ steps.version.outputs.version }}"
           
-      - name: Push changes
-        id: push-changes
-        run: |
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if git push; then
-              echo "push_success=true" >> $GITHUB_OUTPUT
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Push failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
-                git pull --rebase
-              else
-                echo "push_success=false" >> $GITHUB_OUTPUT
-                echo "Failed to push changes after $MAX_RETRIES attempts"
-                exit 1
-              fi
-            fi
-          done
-          
-          # Push tags with retries
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if git push --tags; then
-              echo "push_tags_success=true" >> $GITHUB_OUTPUT
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Pushing tags failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
-                git pull --tags
-              else
-                echo "push_tags_success=false" >> $GITHUB_OUTPUT
-                echo "Failed to push tags after $MAX_RETRIES attempts"
-                exit 1
-              fi
-            fi
-          done
-        
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create Tag
+        uses: rickstaa/action-create-tag@v1
         with:
-          tag_name: v${{ steps.set-version.outputs.version }}
-          name: Release v${{ steps.set-version.outputs.version }}
-          body_path: ${{ steps.check-tags.outputs.has_tags == 'true' && '.github/CHANGELOG.md' || '' }}
-          body: ${{ steps.check-tags.outputs.has_tags != 'true' && steps.first-release-changelog.outputs.CHANGELOG || '' }}
-          draft: false
-          prerelease: ${{ contains(github.event.inputs.version, 'pre') }}
+          tag: "v${{ steps.version.outputs.version }}"
+          message: "Release v${{ steps.version.outputs.version }}"
+          
+      - name: Generate release notes
+        id: changelog
+        run: |
+          if [ -f .github/changelog-configuration.json ]; then
+            echo "Using changelog configuration"
+          else
+            echo '{"categories": [{"title": "## 🚀 Features","labels": ["feature","enhancement"]},{"title": "## 🐛 Fixes","labels": ["fix","bug"]},{"title": "## 🧪 Tests","labels": ["test"]},{"title": "## 📚 Documentation","labels": ["documentation"]},{"title": "## 🧰 Maintenance","labels": ["chore","dependencies"]}],"ignore_labels": ["ignore"],"sort": "ASC","template": "${{'{{'}}CHANGELOG{{'}}'}}","pr_template": "- ${{'{{'}}TITLE{{'}}'}} (#${{'{{'}}NUMBER{{'}}'}}","empty_template": "No changes"}' > .github/changelog-configuration.json
+          fi
+          
+      - uses: mikepenz/release-changelog-builder-action@v4
+        id: build_changelog
+        with:
+          configurationFile: .github/changelog-configuration.json
+          outputFile: .github/CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Verify NPM token
-        id: check-npm-token
-        continue-on-error: true
+      - name: Determine NPM tag
+        id: npm_tag
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN secret is not set or empty."
-            echo "Please add it to your repository secrets at:"
-            echo "  GitHub repository → Settings → Secrets and variables → Actions → New repository secret"
-            echo "  Name: NPM_TOKEN"
-            echo "  Value: Your npm token from https://www.npmjs.com/settings/{YOUR_USERNAME}/tokens"
-            echo "token_exists=false" >> $GITHUB_OUTPUT
+          # Determine NPM tag based on version or input
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            NPM_TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ steps.version.outputs.version }}" == *"-"* ]]; then
+            NPM_TAG="beta"
           else
-            echo "token_exists=true" >> $GITHUB_OUTPUT
-            echo "NPM token is configured correctly"
+            NPM_TAG="latest"
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          echo "tag=$NPM_TAG" >> $GITHUB_OUTPUT
+          echo "Using NPM tag: $NPM_TAG"
           
-      - name: Skip NPM publish notice
-        if: steps.check-npm-token.outputs.token_exists != 'true'
-        run: |
-          echo "⚠️ Skipping NPM publish due to missing NPM_TOKEN"
-          echo "The GitHub release will still be created, but the package won't be published to npm."
-          echo ""
-          echo "Once you've added the NPM_TOKEN secret, you can publish manually with:"
-          echo "git checkout v${{ steps.set-version.outputs.version }}"
-          echo "npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}"
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: "v${{ steps.version.outputs.version }}"
+          name: "Release v${{ steps.version.outputs.version }}"
+          bodyFile: ".github/CHANGELOG.md"
+          draft: false
+          prerelease: ${{ contains(github.event.inputs.version, 'pre') }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Push changes
+        run: git push --follow-tags
           
       - name: Publish to NPM
-        if: steps.check-npm-token.outputs.token_exists == 'true'
-        id: npm-publish
-        run: |
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}; then
-              echo "publish_success=true" >> $GITHUB_OUTPUT
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Publishing failed, retrying in 10 seconds ($RETRY_COUNT/$MAX_RETRIES)..."
-                sleep 10
-              else
-                echo "publish_success=false" >> $GITHUB_OUTPUT
-                echo "Failed to publish package after $MAX_RETRIES attempts"
-                exit 1
-              fi
-            fi
-          done
+        run: npm publish --provenance --access public --tag ${{ steps.npm_tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          
-      - name: Verify release
-        if: steps.npm-publish.outputs.publish_success == 'true'
-        run: |
-          echo "🔍 Verifying release v${{ steps.set-version.outputs.version }}"
-          
-          # Check npm registry for the package
-          echo "Checking NPM registry (this may take a few minutes to propagate)..."
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if npm view robust-axios-client@${{ steps.set-version.outputs.version }} version --json; then
-              echo "✅ Package verified on NPM registry"
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "Package not found, retrying in 30 seconds ($RETRY_COUNT/$MAX_RETRIES)..."
-                sleep 30
-              else
-                echo "⚠️ Could not verify package on NPM after $MAX_RETRIES attempts"
-                echo "This could be due to propagation delay and doesn't necessarily indicate a failure"
-              fi
-            fi
-          done
-          
-          # Final success message
-          echo "🎉 Release v${{ steps.set-version.outputs.version }} completed!"
-
-      - name: Handle publish failure
-        if: steps.check-npm-token.outputs.token_exists == 'true' && steps.npm-publish.outputs.publish_success != 'true'
-        run: |
-          echo "::warning::Package publishing to NPM failed, but Git release was created."
-          echo "You can publish the package manually with:"
-          echo "git checkout v${{ steps.set-version.outputs.version }}"
-          echo "npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}"
-
-  notify:
-    needs: [release]
-    runs-on: ubuntu-latest
-    if: needs.release.outputs.publish_success == 'true'
-    steps:
-      - name: Send notification
-        run: |
-          echo "🎉 Successfully released version ${{ needs.release.outputs.version }} to npm with tag ${{ needs.release.outputs.tag }}"
-          
-          # Add a notification message - this is a placeholder
-          # In a real workflow, you might want to:
-          # - Post to a Slack channel using webhook
-          # - Send an email notification
-          # - Update a status page
-          # - Notify team members
-          
-          echo "To install the latest version, run:"
-          echo "npm install robust-axios-client@${{ needs.release.outputs.tag }}" 
