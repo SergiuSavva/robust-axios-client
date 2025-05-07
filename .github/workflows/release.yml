@@ -218,17 +218,31 @@ jobs:
           
       - name: Verify NPM token
         id: check-npm-token
+        continue-on-error: true
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN secret is not set or empty. Please add it to your repository secrets."
+            echo "::warning::NPM_TOKEN secret is not set or empty."
+            echo "Please add it to your repository secrets at:"
+            echo "  GitHub repository → Settings → Secrets and variables → Actions → New repository secret"
+            echo "  Name: NPM_TOKEN"
+            echo "  Value: Your npm token from https://www.npmjs.com/settings/{YOUR_USERNAME}/tokens"
             echo "token_exists=false" >> $GITHUB_OUTPUT
-            exit 1
           else
             echo "token_exists=true" >> $GITHUB_OUTPUT
             echo "NPM token is configured correctly"
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Skip NPM publish notice
+        if: steps.check-npm-token.outputs.token_exists != 'true'
+        run: |
+          echo "⚠️ Skipping NPM publish due to missing NPM_TOKEN"
+          echo "The GitHub release will still be created, but the package won't be published to npm."
+          echo ""
+          echo "Once you've added the NPM_TOKEN secret, you can publish manually with:"
+          echo "git checkout v${{ steps.set-version.outputs.version }}"
+          echo "npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}"
           
       - name: Publish to NPM
         if: steps.check-npm-token.outputs.token_exists == 'true'
