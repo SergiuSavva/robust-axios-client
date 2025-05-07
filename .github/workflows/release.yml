@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (patch, minor, major, or specific version)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+          - custom
+      custom-version:
+        description: 'Custom version (only used when version is "custom")'
+        required: false
+        type: string
+  
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run tests
+        run: npm test
+        
+      - name: Run lint
+        run: npm run lint
+        
+      - name: Build
+        run: npm run build
+      
+      - name: Configure Git
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+      - name: Set version
+        id: set-version
+        run: |
+          if [ "${{ github.event.inputs.version }}" = "custom" ]; then
+            if [ -z "${{ github.event.inputs.custom-version }}" ]; then
+              echo "Error: Custom version is required when version type is 'custom'"
+              exit 1
+            fi
+            VERSION="${{ github.event.inputs.custom-version }}"
+            npm version $VERSION --no-git-tag-version
+          else
+            VERSION=$(npm version ${{ github.event.inputs.version }} --no-git-tag-version)
+          fi
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+          echo "New version: ${VERSION#v}"
+      
+      - name: Generate Changelog
+        id: changelog
+        uses: metcalfc/changelog-generator@v4.1.0
+        with:
+          myToken: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Update README with version badge
+        run: |
+          VERSION=${{ steps.set-version.outputs.version }}
+          # Update version in README if needed
+          if grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
+            echo "README already has version badge"
+          fi
+          
+      - name: Commit changes
+        run: |
+          VERSION=${{ steps.set-version.outputs.version }}
+          git add package.json package-lock.json README.md
+          git commit -m "chore: release v${VERSION}" || echo "No changes to commit"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          
+      - name: Push changes
+        run: git push && git push --tags
+        
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.set-version.outputs.version }}
+          name: Release v${{ steps.set-version.outputs.version }}
+          body: |
+            ## Changes in this Release
+            
+            ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(github.event.inputs.version, 'pre') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Publish to NPM
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 

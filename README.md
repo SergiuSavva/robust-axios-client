@@ -254,6 +254,45 @@ The client handles various error scenarios with dedicated error classes:
 
 This library is written in TypeScript and includes comprehensive type definitions.
 
+## Testing
+
+### E2E Testing with Fake API Service
+
+This library includes a fake API service for end-to-end testing without relying on external services. This is particularly useful for testing error handling, retry mechanisms, circuit breakers, and other resilience features.
+
+```typescript
+import { TestServer } from 'robust-axios-client/tests/helpers/test-server';
+import RobustAxios from 'robust-axios-client';
+
+// Start the test server
+const server = new TestServer();
+const baseURL = await server.start();
+
+// Create a client pointing to the test server
+const client = RobustAxios.create({ baseURL });
+
+// Simulate a server error
+server.setFailurePattern('/api/users', 500);
+
+// Simulate rate limiting
+server.setRateLimit('/api/data', 5, 10000);
+
+// Simulate slow responses
+server.setResponseDelay('/api/slow', 3000);
+
+// Make requests to test different scenarios
+try {
+  await client.get('/api/users');
+} catch (error) {
+  // Handle server error
+}
+
+// Clean up when done
+await server.stop();
+```
+
+For more detailed examples and documentation, see the [E2E Testing README](tests/e2e/README.md).
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
