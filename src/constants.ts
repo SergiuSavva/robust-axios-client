@@ -25,7 +25,7 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
   circuitBreaker: {
     failureThreshold: 5,
     resetTimeout: 60000,
-    halfOpenMaxRequests: 3
+    halfOpenMaxRequests: 3,
   },
   backoffStrategy: 'exponential',
   customBackoff: (retryCount) => retryCount * 1000,
@@ -33,5 +33,5 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
   onSuccess: () => {},
   onFailed: () => {},
   onCircuitBreakerStateChange: () => {},
-  requestCategories: {}
-}; 
+  requestCategories: {},
+};

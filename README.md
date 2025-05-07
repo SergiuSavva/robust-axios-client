@@ -1,6 +1,6 @@
 # robust-axios-client
 
-[![npm version](https://img.shields.io/npm/v/robust-axios-client.svg)](https://www.npmjs.com/package/robust-axios-client)
+[![npm version](https://img.shields.io/npm/v/robust-axios-client/v0.1.0.svg)](https://www.npmjs.com/package/robust-axios-client)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/robust-axios-client.svg)](https://nodejs.org)
 

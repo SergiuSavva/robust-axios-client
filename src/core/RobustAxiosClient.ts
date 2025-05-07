@@ -4,16 +4,11 @@ import axios, {
   AxiosInstance,
   AxiosRequestConfig,
   AxiosResponse,
-  InternalAxiosRequestConfig
+  InternalAxiosRequestConfig,
 } from 'axios';
 
 // Import types
-import {
-  LoggerInterface,
-  RetryConfig,
-  RetryContext,
-  RobustAxiosConfig
-} from '../types';
+import { LoggerInterface, RetryConfig, RetryContext, RobustAxiosConfig } from '../types';
 
 // Import error classes
 import {
@@ -24,7 +19,7 @@ import {
   RateLimitError,
   ServerError,
   TimeoutError,
-  ValidationError
+  ValidationError,
 } from '../errors';
 
 // Import utilities
@@ -66,12 +61,12 @@ export class RobustAxiosClient {
     this.dryRun = config.dryRun ?? false;
     this.debug = config.debug ?? false;
     this.customErrorHandler = config.customErrorHandler;
-    
+
     // Allow overriding the context max age
     if (config.contextMaxAge !== undefined) {
       this.contextMaxAge = config.contextMaxAge;
     }
-    
+
     if (config.contextThreshold !== undefined) {
       this.contextThreshold = config.contextThreshold;
     }
@@ -82,7 +77,7 @@ export class RobustAxiosClient {
     // Initialize retry configuration with defaults
     this.retryConfig = {
       ...DEFAULT_RETRY_CONFIG,
-      ...config.retry
+      ...config.retry,
     };
 
     // Initialize circuit breaker if enabled
@@ -140,31 +135,55 @@ export class RobustAxiosClient {
   }
 
   // HTTP method wrappers
-  public async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async get<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'GET', url });
   }
 
-  public async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async delete<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'DELETE', url });
   }
 
-  public async head<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async head<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'HEAD', url });
   }
 
-  public async options<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async options<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'OPTIONS', url });
   }
 
-  public async post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async post<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'POST', url, data });
   }
 
-  public async put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async put<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'PUT', url, data });
   }
 
-  public async patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public async patch<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return this.request<T>({ ...config, method: 'PATCH', url, data });
   }
 
@@ -183,15 +202,17 @@ export class RobustAxiosClient {
   // Interceptor Management
   //--------------------------------------------------------------------------
   public addRequestInterceptor(
-    onFulfilled: (config: InternalAxiosRequestConfig) => InternalAxiosRequestConfig | Promise<InternalAxiosRequestConfig>,
-    onRejected?: (error: unknown) => unknown,
+    onFulfilled: (
+      config: InternalAxiosRequestConfig
+    ) => InternalAxiosRequestConfig | Promise<InternalAxiosRequestConfig>,
+    onRejected?: (error: unknown) => unknown
   ): number {
     return this.axiosInstance.interceptors.request.use(onFulfilled, onRejected);
   }
 
   public addResponseInterceptor(
     onFulfilled: (response: AxiosResponse) => AxiosResponse | Promise<AxiosResponse>,
-    onRejected?: (error: unknown) => unknown,
+    onRejected?: (error: unknown) => unknown
   ): number {
     return this.axiosInstance.interceptors.response.use(onFulfilled, onRejected);
   }
@@ -224,7 +245,9 @@ export class RobustAxiosClient {
     );
   }
 
-  private async handleRequestInterception(config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> {
+  private async handleRequestInterception(
+    config: InternalAxiosRequestConfig
+  ): Promise<InternalAxiosRequestConfig> {
     // Check circuit breaker state
     if (this.circuitBreaker && !(await this.circuitBreaker.beforeRequest())) {
       throw new Error('Circuit breaker is open');
@@ -243,7 +266,7 @@ export class RobustAxiosClient {
       startTime: Date.now(),
       attempts: [],
       requestConfig: config,
-      category: this.determineRequestCategory(config)
+      category: this.determineRequestCategory(config),
     });
 
     // Cleanup old contexts based on age
@@ -298,7 +321,9 @@ export class RobustAxiosClient {
 
     // Ensure error is an AxiosError before proceeding
     if (!isAxiosError(error)) {
-      return Promise.reject(this.handleError(error instanceof Error ? error : new Error(String(error))));
+      return Promise.reject(
+        this.handleError(error instanceof Error ? error : new Error(String(error)))
+      );
     }
 
     if (!error.config) {
@@ -315,7 +340,7 @@ export class RobustAxiosClient {
     context.attempts.push({
       timestamp: Date.now(),
       error,
-      duration: Date.now() - context.startTime
+      duration: Date.now() - context.startTime,
     });
 
     // Determine if we should retry
@@ -364,10 +389,7 @@ export class RobustAxiosClient {
 
     // Apply timeout strategy if configured
     if (error.config?.timeout) {
-      error.config.timeout = this.calculateNextTimeout(
-        error.config.timeout,
-        context.retryCount
-      );
+      error.config.timeout = this.calculateNextTimeout(error.config.timeout, context.retryCount);
     }
 
     // Ensure config exists before proceeding
@@ -392,12 +414,14 @@ export class RobustAxiosClient {
 
       // Handle cancellation during delay
       if (cancelToken) {
-        cancelToken.promise.then(() => {
-          clearTimeout(timeoutId);
-          reject(new CancellationError('Request was cancelled during retry delay'));
-        }).catch(() => {
-          // Ignore errors in the cancellation promise
-        });
+        cancelToken.promise
+          .then(() => {
+            clearTimeout(timeoutId);
+            reject(new CancellationError('Request was cancelled during retry delay'));
+          })
+          .catch(() => {
+            // Ignore errors in the cancellation promise
+          });
       }
     });
 
@@ -438,17 +462,17 @@ export class RobustAxiosClient {
     // Use an iterative approach instead of recursive to avoid exponential complexity
     if (n <= 0) return 0;
     if (n === 1) return 1000; // 1 second
-    
+
     let prev = 0;
     let current = 1;
-    
+
     // Calculate Fibonacci number iteratively
     for (let i = 2; i <= n; i++) {
       const next = prev + current;
       prev = current;
       current = next;
     }
-    
+
     // Return delay in milliseconds
     return current * 1000;
   }
@@ -475,10 +499,12 @@ export class RobustAxiosClient {
     }
 
     // Handle specific error types
-    if (error instanceof RateLimitError || 
-        error instanceof CancellationError ||
-        error instanceof TimeoutError ||
-        error instanceof ValidationError) {
+    if (
+      error instanceof RateLimitError ||
+      error instanceof CancellationError ||
+      error instanceof TimeoutError ||
+      error instanceof ValidationError
+    ) {
       return error;
     }
 
@@ -487,35 +513,43 @@ export class RobustAxiosClient {
       if (!error.response) {
         // Specific timeout error cases
         if (error.code === 'ECONNABORTED') {
-          return new TimeoutError(`Request timed out after ${error.config?.timeout || 'unknown'}ms`);
+          return new TimeoutError(
+            `Request timed out after ${error.config?.timeout || 'unknown'}ms`
+          );
         }
-        
+
         if (error.code === 'ETIMEDOUT') {
           return new TimeoutError('Connection timed out while waiting for response');
         }
-        
+
         if (error.code === 'ECONNREFUSED') {
-          return new NetworkError(`Connection refused to ${error.config?.url || 'unknown endpoint'}`, error);
+          return new NetworkError(
+            `Connection refused to ${error.config?.url || 'unknown endpoint'}`,
+            error
+          );
         }
-        
+
         if (error.code === 'ENOTFOUND') {
-          return new NetworkError(`Host not found: ${error.config?.url ? new URL(error.config.url).hostname : 'unknown host'}`, error);
+          return new NetworkError(
+            `Host not found: ${error.config?.url ? new URL(error.config.url).hostname : 'unknown host'}`,
+            error
+          );
         }
 
         if (error.code === 'CERT_HAS_EXPIRED') {
           return new NetworkError('SSL certificate has expired', error);
         }
-        
+
         if (error.message.includes('Network Error')) {
           return new NetworkError('Network connectivity issue detected', error);
         }
-        
+
         return new NetworkError(`Network error occurred: ${error.message}`, error);
       }
 
       // Handle response errors
       const status = error.response.status;
-      
+
       // Client errors (4xx)
       if (status >= 400 && status < 500) {
         if (status === 429) {
@@ -526,7 +560,7 @@ export class RobustAxiosClient {
           }
           return new RateLimitError('Rate limit exceeded');
         }
-        
+
         if (status === 422) {
           // Add validation details if available
           try {
@@ -551,21 +585,21 @@ export class RobustAxiosClient {
         }
 
         if (status === 404) {
-          return new ClientError(`Resource not found: ${error.config?.url || 'unknown'}`, status, error.response);
+          return new ClientError(
+            `Resource not found: ${error.config?.url || 'unknown'}`,
+            status,
+            error.response
+          );
         }
-        
+
         return new ClientError(error.message || `Client error (${status})`, status, error.response);
       }
-      
+
       // Server errors (5xx)
       if (status >= 500) {
-        return new ServerError(
-          error.message || `Server error (${status})`, 
-          status, 
-          error.response
-        );
+        return new ServerError(error.message || `Server error (${status})`, status, error.response);
       }
-      
+
       // Fallback to generic HTTP error
       return new HttpError(error.message, status, error.response);
     }
@@ -575,7 +609,7 @@ export class RobustAxiosClient {
       if (error.message.includes('timeout')) {
         return new TimeoutError(`Operation timed out: ${error.message}`);
       }
-      
+
       if (error.message.includes('network') || error.message.includes('connection')) {
         return new NetworkError(`Network issue: ${error.message}`, error);
       }
@@ -650,10 +684,10 @@ export class RobustAxiosClient {
     const method = config.method?.toUpperCase() || 'UNKNOWN';
     const baseUrl = config.baseURL?.replace(/\/+$/, '') || '';
     const path = config.url?.replace(/^\/+/, '') || 'unknown';
-    
+
     // Normalize URL parts and combine them
     const fullUri = baseUrl ? `${baseUrl}/${path}` : path;
-    
+
     // Include params hash if present (helps differentiate GET requests to same endpoint)
     let paramsComponent = '';
     if (config.params) {
@@ -664,40 +698,43 @@ export class RobustAxiosClient {
         // Ignore if params cannot be stringified
       }
     }
-    
+
     // Create a timestamp-based component for uniqueness
     const timestamp = Date.now().toString(36);
     const randomComponent = Math.random().toString(36).substring(2, 8);
-    
+
     return `${method}-${fullUri}${paramsComponent}-${timestamp}${randomComponent}`;
   }
 
   private getRetryContext(config?: AxiosRequestConfig): RetryContext | undefined {
     if (!config) return undefined;
-    
+
     // Generate the exact request ID
     const requestId = this.generateRequestId(config);
-    
+
     // Try to find the context by exact ID - this will also mark it as recently used in the LRU cache
     const context = this.retryContexts.get(requestId);
-    
+
     // If found, return it
     if (context) return context;
-    
+
     // If not found by exact ID, look through all contexts
     // This helps in tests where mocks might create slightly different configs
     let fallbackContext: RetryContext | undefined;
-    
+
     this.retryContexts.forEach((ctx, id) => {
-      if (!fallbackContext && ctx.requestConfig.method === config.method && 
-          ctx.requestConfig.url === config.url) {
+      if (
+        !fallbackContext &&
+        ctx.requestConfig.method === config.method &&
+        ctx.requestConfig.url === config.url
+      ) {
         fallbackContext = ctx;
         // Update the key to mark this as recently used
         this.retryContexts.delete(id);
         this.retryContexts.set(id, ctx);
       }
     });
-    
+
     return fallbackContext;
   }
 
@@ -717,14 +754,14 @@ export class RobustAxiosClient {
         expiredKeys.push(key);
       }
     });
-    
+
     // Delete expired keys
-    expiredKeys.forEach(key => {
+    expiredKeys.forEach((key) => {
       this.retryContexts.delete(key);
     });
-    
+
     // LRU cache already manages size limits
-    
+
     if (expiredKeys.length > 0) {
       this.logger.debug(`Cleaned up ${expiredKeys.length} expired contexts`);
     }
@@ -746,4 +783,4 @@ export class RobustAxiosClient {
     if (!category) return undefined;
     return this.retryConfig.requestCategories[category]?.settings;
   }
-} 
+}

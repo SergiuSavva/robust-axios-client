@@ -8,7 +8,7 @@ export {
   LoggerInterface,
   RetryConfig,
   RetryContext,
-  RobustAxiosConfig
+  RobustAxiosConfig,
 } from './types';
 
 // Re-export error classes
@@ -20,7 +20,7 @@ export {
   RateLimitError,
   ServerError,
   TimeoutError,
-  ValidationError
+  ValidationError,
 } from './errors';
 
 // Re-export utilities

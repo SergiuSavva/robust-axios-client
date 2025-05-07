@@ -16,8 +16,8 @@ export {
   ServerError,
   TimeoutError,
   ValidationError,
-  CancellationError
+  CancellationError,
 } from './index';
 
 // Export as default
-export default RobustAxios; 
+export default RobustAxios;

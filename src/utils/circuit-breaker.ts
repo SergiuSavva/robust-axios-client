@@ -49,4 +49,4 @@ export class CircuitBreaker {
     this.lastStateChange = Date.now();
     this.onStateChange?.(newState);
   }
-} 
+}

@@ -28,4 +28,4 @@ export class TokenBucketRateLimiter {
     this.tokens = Math.min(this.maxTokens, this.tokens + newTokens);
     this.lastRefill = now;
   }
-} 
+}

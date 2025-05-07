@@ -11,17 +11,17 @@ export class RobustAxiosFactory {
 
   /**
    * Creates a new instance of RobustAxiosClient with the provided configuration.
-   * 
+   *
    * @param {RobustAxiosConfig} config - Configuration options for RobustAxiosClient
    * @returns {RobustAxiosClient} A new RobustAxiosClient instance
-   * 
+   *
    * @example
    * ```typescript
    * // Create with default settings
    * const api = RobustAxios.create({
    *   baseURL: 'https://api.example.com'
    * });
-   * 
+   *
    * // Create with retry settings
    * const api = RobustAxios.create({
    *   baseURL: 'https://api.example.com',
@@ -57,31 +57,55 @@ export class RobustAxiosFactory {
     return RobustAxiosFactory.getDefaultInstance().request<T>(config);
   }
 
-  public static get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static get<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().get<T>(url, config);
   }
 
-  public static delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static delete<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().delete<T>(url, config);
   }
 
-  public static head<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static head<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().head<T>(url, config);
   }
 
-  public static options<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static options<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().options<T>(url, config);
   }
 
-  public static post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static post<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().post<T>(url, data, config);
   }
 
-  public static put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static put<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().put<T>(url, data, config);
   }
 
-  public static patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+  public static patch<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().patch<T>(url, data, config);
   }
 
@@ -116,4 +140,4 @@ export class RobustAxiosFactory {
   public static updateConfig(newConfig: AxiosRequestConfig): void {
     return RobustAxiosFactory.getDefaultInstance().updateConfig(newConfig);
   }
-} 
+}

@@ -1,6 +1,6 @@
 {
   "name": "robust-axios-client",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "A robust Axios client implementation",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",

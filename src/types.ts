@@ -1,8 +1,4 @@
-import {
-  AxiosError,
-  AxiosRequestConfig,
-  AxiosResponse
-} from 'axios';
+import { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 
 // Circuit breaker states
 export type CircuitBreakerState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
@@ -78,4 +74,4 @@ export interface RobustAxiosConfig extends AxiosRequestConfig {
   };
   contextMaxAge?: number; // Maximum age for retry contexts in ms
   contextThreshold?: number; // Maximum number of contexts before cleanup
-} 
+}
