@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
           
@@ -43,12 +43,15 @@ jobs:
         
       - name: Run tests
         run: npm test
+        continue-on-error: false
         
       - name: Run lint
         run: npm run lint
+        continue-on-error: false
         
       - name: Build
         run: npm run build
+        continue-on-error: false
       
       - name: Configure Git
         run: |
@@ -70,54 +73,59 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "New version: $VERSION"
       
+      - name: Check for existing tags
+        id: check-tags
+        run: |
+          if git tag | grep -q .; then
+            echo "has_tags=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_tags=false" >> $GITHUB_OUTPUT
+            echo "This is the first release of the package."
+          fi
+
       - name: Generate Changelog
         id: changelog
+        if: steps.check-tags.outputs.has_tags == 'true'
         uses: mikepenz/release-changelog-builder-action@v4
         with:
-          configuration: |
-            {
-              "categories": [
-                {
-                  "title": "## 🚀 Features",
-                  "labels": ["feature", "enhancement"]
-                },
-                {
-                  "title": "## 🐛 Fixes",
-                  "labels": ["fix", "bug"]
-                },
-                {
-                  "title": "## 📦 Dependencies",
-                  "labels": ["dependencies"]
-                },
-                {
-                  "title": "## 🧪 Tests",
-                  "labels": ["test"]
-                },
-                {
-                  "title": "## 📝 Documentation",
-                  "labels": ["documentation"]
-                },
-                {
-                  "title": "## 🔄 Other Changes",
-                  "labels": []
-                }
-              ],
-              "template": "#{{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n#{{UNCATEGORIZED}}\n</details>",
-              "pr_template": "- #{{TITLE}} (#{{NUMBER}})"
-            }
+          configurationFile: .github/changelog-configuration.json
+          outputFile: .github/CHANGELOG.md
+          fetchReleaseInformation: true
+          fetchReviewers: true
+          fetchReviews: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
+      - name: Set default changelog for first release
+        if: steps.check-tags.outputs.has_tags == 'false'
+        run: |
+          echo 'CHANGELOG<<EOF' >> $GITHUB_OUTPUT
+          echo '## 🎉 First Release' >> $GITHUB_OUTPUT
+          echo 'Initial release of robust-axios-client package.' >> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
+        id: first-release-changelog
+
       - name: Update README with version badge
         run: |
           VERSION=${{ steps.set-version.outputs.version }}
-          if grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
-            echo "Updating badge in README"
-            sed -i 's|img.shields.io/npm/v/robust-axios-client/[^)]*|img.shields.io/npm/v/robust-axios-client/v'${VERSION}'|g' README.md || \
-            sed -i 's|img.shields.io/npm/v/robust-axios-client|img.shields.io/npm/v/robust-axios-client/v'${VERSION}'|g' README.md
+          
+          # Check if README.md exists
+          if [ ! -f README.md ]; then
+            echo "Creating README.md with badge"
+            echo "# robust-axios-client" > README.md
+            echo "" >> README.md
+            echo "[![npm version](https://img.shields.io/npm/v/robust-axios-client/v${VERSION}.svg)](https://www.npmjs.com/package/robust-axios-client)" >> README.md
+            echo "" >> README.md
+            echo "A robust Axios client with circuit breaking, rate limiting, and retry capabilities." >> README.md
+          elif grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
+            echo "Updating existing badge in README"
+            # Try different patterns to match the badge
+            sed -i -E 's|img.shields.io/npm/v/robust-axios-client(/v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?)?|img.shields.io/npm/v/robust-axios-client/v'"${VERSION}"'|g' README.md
           else
-            echo "Adding badge to README"
-            sed -i '1i\[![npm version](https://img.shields.io/npm/v/robust-axios-client/v'${VERSION}'.svg)](https://www.npmjs.com/package/robust-axios-client)\n' README.md
+            echo "Adding badge to README after title"
+            # Insert after the first line containing # (markdown title)
+            awk 'FNR==1{print} FNR==2{print "[![npm version](https://img.shields.io/npm/v/robust-axios-client/v'"${VERSION}"'.svg)](https://www.npmjs.com/package/robust-axios-client)\n"} FNR!=1 && FNR!=2{print}' README.md > README.md.tmp
+            mv README.md.tmp README.md
           fi
           
       - name: Commit changes
@@ -128,19 +136,54 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           
       - name: Push changes
+        id: push-changes
         run: |
-          git push || (echo "Retrying with pull and rebase..." && git pull --rebase && git push)
-          git push --tags || (echo "Retrying tag push..." && git pull --tags && git push --tags)
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if git push; then
+              echo "push_success=true" >> $GITHUB_OUTPUT
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Push failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                git pull --rebase
+              else
+                echo "push_success=false" >> $GITHUB_OUTPUT
+                echo "Failed to push changes after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
+          
+          # Push tags with retries
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if git push --tags; then
+              echo "push_tags_success=true" >> $GITHUB_OUTPUT
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Pushing tags failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                git pull --tags
+              else
+                echo "push_tags_success=false" >> $GITHUB_OUTPUT
+                echo "Failed to push tags after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
         
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.set-version.outputs.version }}
           name: Release v${{ steps.set-version.outputs.version }}
-          body: |
-            ## Changes in this Release
-            
-            ${{ steps.changelog.outputs.changelog }}
+          body_path: ${{ steps.check-tags.outputs.has_tags == 'true' && '.github/CHANGELOG.md' || '' }}
+          body: ${{ steps.check-tags.outputs.has_tags != 'true' && steps.first-release-changelog.outputs.CHANGELOG || '' }}
           draft: false
           prerelease: ${{ contains(github.event.inputs.version, 'pre') }}
         env:
@@ -149,4 +192,32 @@ jobs:
       - name: Publish to NPM
         run: npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          
+      - name: Verify release
+        run: |
+          echo "🔍 Verifying release v${{ steps.set-version.outputs.version }}"
+          
+          # Check npm registry for the package
+          echo "Checking NPM registry (this may take a few minutes to propagate)..."
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if npm view robust-axios-client@${{ steps.set-version.outputs.version }} version --json; then
+              echo "✅ Package verified on NPM registry"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Package not found, retrying in 30 seconds ($RETRY_COUNT/$MAX_RETRIES)..."
+                sleep 30
+              else
+                echo "⚠️ Could not verify package on NPM after $MAX_RETRIES attempts"
+                echo "This could be due to propagation delay and doesn't necessarily indicate a failure"
+              fi
+            fi
+          done
+          
+          # Final success message
+          echo "🎉 Release v${{ steps.set-version.outputs.version }} completed!" 
