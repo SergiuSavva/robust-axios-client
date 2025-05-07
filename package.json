@@ -88,12 +88,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sergiusavva/robust-axios-client"
+    "url": "https://github.com/SergiuSavva/robust-axios-client.git"
   },
   "bugs": {
-    "url": "https://github.com/sergiusavva/robust-axios-client/issues"
+    "url": "https://github.com/SergiuSavva/robust-axios-client/issues"
   },
-  "homepage": "https://github.com/sergiusavva/robust-axios-client#readme",
+  "homepage": "https://github.com/SergiuSavva/robust-axios-client#readme",
   "engines": {
     "node": ">=14.0.0"
   },
