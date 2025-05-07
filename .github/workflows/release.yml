@@ -16,6 +16,11 @@ on:
           - preminor
           - premajor
           - prerelease
+      tag:
+        description: 'NPM tag to publish with (default: latest for stable, beta for pre-releases)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -24,6 +29,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      tag: ${{ steps.npm-tag.outputs.tag }}
+      publish_success: ${{ steps.npm-publish.outputs.publish_success }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,6 +137,24 @@ jobs:
             mv README.md.tmp README.md
           fi
           
+      - name: Resolve NPM tag
+        id: npm-tag
+        run: |
+          # Determine the NPM tag based on version or input
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            # Use user-provided tag if specified
+            NPM_TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ steps.set-version.outputs.version }}" == *"-"* ]]; then
+            # Use 'beta' tag for pre-release versions (containing a hyphen)
+            NPM_TAG="beta"
+          else
+            # Default to 'latest' for regular releases
+            NPM_TAG="latest"
+          fi
+          
+          echo "Using NPM tag: $NPM_TAG"
+          echo "tag=$NPM_TAG" >> $GITHUB_OUTPUT
+          
       - name: Commit changes
         run: |
           VERSION=${{ steps.set-version.outputs.version }}
@@ -189,12 +216,45 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
+      - name: Verify NPM token
+        id: check-npm-token
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::NPM_TOKEN secret is not set. Please add it to your repository secrets."
+            echo "token_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "token_exists=true" >> $GITHUB_OUTPUT
+          fi
+          
       - name: Publish to NPM
-        run: npm publish --provenance --access public
+        if: steps.check-npm-token.outputs.token_exists == 'true'
+        id: npm-publish
+        run: |
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}; then
+              echo "publish_success=true" >> $GITHUB_OUTPUT
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Publishing failed, retrying in 10 seconds ($RETRY_COUNT/$MAX_RETRIES)..."
+                sleep 10
+              else
+                echo "publish_success=false" >> $GITHUB_OUTPUT
+                echo "Failed to publish package after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           
       - name: Verify release
+        if: steps.npm-publish.outputs.publish_success == 'true'
         run: |
           echo "🔍 Verifying release v${{ steps.set-version.outputs.version }}"
           
@@ -220,4 +280,31 @@ jobs:
           done
           
           # Final success message
-          echo "🎉 Release v${{ steps.set-version.outputs.version }} completed!" 
+          echo "🎉 Release v${{ steps.set-version.outputs.version }} completed!"
+
+      - name: Handle publish failure
+        if: steps.check-npm-token.outputs.token_exists == 'true' && steps.npm-publish.outputs.publish_success != 'true'
+        run: |
+          echo "::warning::Package publishing to NPM failed, but Git release was created."
+          echo "You can publish the package manually with:"
+          echo "git checkout v${{ steps.set-version.outputs.version }}"
+          echo "npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}"
+
+  notify:
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: needs.release.outputs.publish_success == 'true'
+    steps:
+      - name: Send notification
+        run: |
+          echo "🎉 Successfully released version ${{ needs.release.outputs.version }} to npm with tag ${{ needs.release.outputs.tag }}"
+          
+          # Add a notification message - this is a placeholder
+          # In a real workflow, you might want to:
+          # - Post to a Slack channel using webhook
+          # - Send an email notification
+          # - Update a status page
+          # - Notify team members
+          
+          echo "To install the latest version, run:"
+          echo "npm install robust-axios-client@${{ needs.release.outputs.tag }}" 
