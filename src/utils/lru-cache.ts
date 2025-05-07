@@ -5,7 +5,7 @@
 export class LRUCache<K, V> {
   private capacity: number;
   private cache = new Map<K, V>();
-  
+
   // Using a Map for O(1) access to node positions
   private nodes = new Map<K, Node<K>>();
   private head: Node<K> | null = null;
@@ -21,12 +21,12 @@ export class LRUCache<K, V> {
    */
   get(key: K): V | undefined {
     const value = this.cache.get(key);
-    
+
     if (value !== undefined) {
       // Move to most recently used position
       this.markAsUsed(key);
     }
-    
+
     return value;
   }
 
@@ -42,12 +42,12 @@ export class LRUCache<K, V> {
       this.markAsUsed(key);
       return;
     }
-    
+
     // Evict least recently used if at capacity
     if (this.cache.size >= this.capacity) {
       this.evictLRU();
     }
-    
+
     // Add new item
     this.cache.set(key, value);
     this.addToFront(key);
@@ -60,14 +60,14 @@ export class LRUCache<K, V> {
     if (!this.cache.has(key)) {
       return false;
     }
-    
+
     // Remove from linked list
     const node = this.nodes.get(key);
     if (node) {
       this.removeNode(node);
       this.nodes.delete(key);
     }
-    
+
     // Remove from cache map
     return this.cache.delete(key);
   }
@@ -163,15 +163,15 @@ export class LRUCache<K, V> {
     // Set node's next/prev
     node.next = this.head;
     node.prev = null;
-    
+
     // Update previous head
     if (this.head) {
       this.head.prev = node;
     }
-    
+
     // Set as new head
     this.head = node;
-    
+
     // If first node, also set as tail
     if (!this.tail) {
       this.tail = node;
@@ -186,7 +186,7 @@ export class LRUCache<K, V> {
       // Node was head
       this.head = node.next;
     }
-    
+
     // Connect next node to previous node
     if (node.next) {
       node.next.prev = node.prev;
@@ -204,8 +204,8 @@ class Node<K> {
   key: K;
   prev: Node<K> | null = null;
   next: Node<K> | null = null;
-  
+
   constructor(key: K) {
     this.key = key;
   }
-} 
+}

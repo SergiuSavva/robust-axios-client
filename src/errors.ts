@@ -5,7 +5,7 @@ export class HttpError extends Error {
   constructor(
     message: string,
     public statusCode?: number,
-    public response?: AxiosResponse,
+    public response?: AxiosResponse
   ) {
     super(message);
     this.name = 'HttpError';
@@ -44,22 +44,14 @@ export class NetworkError extends Error {
 }
 
 export class ServerError extends HttpError {
-  constructor(
-    message: string,
-    statusCode: number,
-    response?: AxiosResponse
-  ) {
+  constructor(message: string, statusCode: number, response?: AxiosResponse) {
     super(message, statusCode, response);
     this.name = 'ServerError';
   }
 }
 
 export class ClientError extends HttpError {
-  constructor(
-    message: string,
-    statusCode: number,
-    response?: AxiosResponse
-  ) {
+  constructor(message: string, statusCode: number, response?: AxiosResponse) {
     super(message, statusCode, response);
     this.name = 'ClientError';
   }
@@ -70,4 +62,4 @@ export class CancellationError extends Error {
     super(message);
     this.name = 'CancellationError';
   }
-} 
+}
