@@ -219,13 +219,16 @@ jobs:
       - name: Verify NPM token
         id: check-npm-token
         run: |
-          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "::error::NPM_TOKEN secret is not set. Please add it to your repository secrets."
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set or empty. Please add it to your repository secrets."
             echo "token_exists=false" >> $GITHUB_OUTPUT
             exit 1
           else
             echo "token_exists=true" >> $GITHUB_OUTPUT
+            echo "NPM token is configured correctly"
           fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           
       - name: Publish to NPM
         if: steps.check-npm-token.outputs.token_exists == 'true'
