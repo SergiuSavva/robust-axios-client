@@ -1,5 +1,6 @@
 import { http, HttpResponse, delay } from 'msw';
 import { server } from './setup';
+import { mockLogger } from './setup';
 import RobustAxiosFactory from '../../src';
 
 describe('Robust Axios Client with MSW - Retry Tests', () => {
@@ -237,5 +238,48 @@ describe('Robust Axios Client with MSW - Retry Tests', () => {
     expect(response.status).toBe(200);
     expect((response.data as { message: string }).message).toBe('Fast response');
     expect(requestCount).toBe(2);
+  });
+
+  test('should log retry attempts properly', async () => {
+    let requestCount = 0;
+    
+    server.use(
+      http.get('https://example.com/api/retry-log-test', () => {
+        requestCount++;
+        
+        // Succeed on the third attempt
+        if (requestCount < 3) {
+          return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+        }
+        
+        return HttpResponse.json({ message: 'Success after retry' }, { status: 200 });
+      })
+    );
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      debug: true, // Enable debug logging
+      retry: {
+        maxRetries: 3,
+        backoffStrategy: 'linear',
+        retryDelay: () => 10 // Very short delay for tests
+      }
+    });
+    
+    // Clear any previous mock calls
+    jest.clearAllMocks();
+    
+    const response = await client.get('/api/retry-log-test');
+    expect(response.status).toBe(200);
+    
+    // Verify logger was called for each retry attempt
+    // One error log for each failed request (2) and additional logs for the requests
+    expect(mockLogger.error).toHaveBeenCalledTimes(2);
+    
+    // Should include info logs for both requests and responses
+    expect(mockLogger.info).toHaveBeenCalled();
+    
+    // More detailed logging should be in debug logs
+    expect(mockLogger.debug).toHaveBeenCalled();
   });
 }); 

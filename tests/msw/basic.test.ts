@@ -1,7 +1,6 @@
 import { http, HttpResponse } from 'msw';
-import { server } from './setup';
-import RobustAxiosFactory from '../../src';
-import { ClientError, ServerError, TimeoutError } from '../../src';
+import { server, mockLogger } from './setup';
+import RobustAxiosFactory, { ClientError, ServerError, TimeoutError } from '../../src';
 
 describe('Robust Axios Client with MSW - Basic Tests', () => {
   // Reset the RobustAxiosFactory and handlers after each test
@@ -247,4 +246,24 @@ describe('Robust Axios Client with MSW - Basic Tests', () => {
     expect(secondResponse.status).toBe(200);
     expect((secondResponse.data as { count: number }).count).toBe(4); // Fourth request
   }, 10000); // Increase timeout to 10 seconds
+
+  test('should verify logger is called with proper messages', async () => {
+    server.use(
+      http.get('https://example.com/api/logging-test', () => {
+        return HttpResponse.json({ message: 'Success' }, { status: 200 });
+      })
+    );
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      debug: true // Enable debug mode to trigger more logging
+    });
+    
+    const response = await client.get('/api/logging-test');
+    expect(response.status).toBe(200);
+    
+    // Verify that logger methods were called
+    expect(mockLogger.info).toHaveBeenCalled();
+    expect(mockLogger.debug).toHaveBeenCalled();
+  });
 }); 

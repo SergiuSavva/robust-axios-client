@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
+import { mockLogger } from './setup';
 import RobustAxiosFactory from '../../src';
 import { CircuitBreakerState } from '../../src';
 
@@ -153,5 +154,56 @@ describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
     // Next request should still fail with circuit breaker error
     const error2 = await client.get('/api/always-fail').catch(e => e);
     expect(error2.message).toContain('Circuit breaker is open');
+  });
+
+  test('should log circuit breaker state changes', async () => {
+    // Track circuit breaker state changes
+    const stateChanges: CircuitBreakerState[] = [];
+    
+    server.use(
+      http.get('https://example.com/api/log-test', () => {
+        return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+      })
+    );
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      debug: true, // Enable debug logs
+      retry: {
+        maxRetries: 0,
+        circuitBreaker: {
+          failureThreshold: 3,      // Open after 3 failures
+          resetTimeout: 10000,      // Stay open for 10 seconds
+          halfOpenMaxRequests: 1    // Allow 1 test request in half-open state
+        },
+        onCircuitBreakerStateChange: (newState) => {
+          stateChanges.push(newState);
+        }
+      }
+    });
+
+    // Make 3 requests to trigger the circuit breaker
+    await expect(client.get('/api/log-test')).rejects.toThrow();
+    await expect(client.get('/api/log-test')).rejects.toThrow();
+    await expect(client.get('/api/log-test')).rejects.toThrow();
+    
+    // The 4th request should be rejected by the circuit breaker without hitting the API
+    const error = await client.get('/api/log-test').catch(e => e);
+    expect(error.message).toContain('Circuit breaker is open');
+    
+    // Verify logger was called
+    expect(mockLogger.error).toHaveBeenCalled();
+    expect(mockLogger.debug).toHaveBeenCalled();
+    expect(mockLogger.info).toHaveBeenCalled();
+    
+    // Reset mock call history
+    jest.clearAllMocks();
+    
+    // Verify we can check for specific log messages if needed
+    await expect(client.get('/api/log-test')).rejects.toThrow();
+    
+    // When circuit breaker is open, error is logged but not info with "Request:"
+    expect(mockLogger.error).toHaveBeenCalled();
+    // Circuit breaker prevents the request from being made, so no request log
   });
 }); 
