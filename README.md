@@ -195,7 +195,9 @@ const client = RobustAxios.create({
 ### RobustAxios Methods
 
 #### Static Methods
-- `create(config: RobustAxiosConfig): RobustAxios`
+Note: Static methods like `get`, `post`, etc., operate on a default, shared instance of RobustAxios. For creating and managing separate, explicitly configured instances, use `RobustAxios.create()`.
+
+- `create(config: RobustAxiosConfig): RobustAxiosClient`
 - `request<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>>`
 - `get<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
 - `post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
@@ -205,10 +207,14 @@ const client = RobustAxios.create({
 - `head<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
 - `options<T>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>`
 - `getUri(config?: AxiosRequestConfig): string`
+- `setDefaultHeader(key: string, value: string): void`
+- `updateConfig(newConfig: AxiosRequestConfig): void`
 - `all<T>(values: Array<T | Promise<T>>): Promise<T[]>`
 - `spread<T, R>(callback: (...args: T[]) => R): (array: T[]) => R`
 - `isCancel(value: unknown): boolean`
 - `isAxiosError(payload: unknown): payload is AxiosError`
+- `CancelToken`
+- `Cancel`
 
 #### Instance Methods
 - `request<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>>`

@@ -5,9 +5,8 @@ import RobustAxiosFactory from '../../src';
 import { CircuitBreakerState } from '../../src';
 
 describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
-  // Reset the RobustAxiosFactory and handlers after each test
+  // Reset the handlers after each test
   afterEach(() => {
-    RobustAxiosFactory._resetForTesting();
     server.resetHandlers();
   });
 

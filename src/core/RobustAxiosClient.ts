@@ -459,14 +459,33 @@ export class RobustAxiosClient {
   }
 
   private calculateFibonacciDelay(n: number): number {
+    // Calculates the nth Fibonacci number and returns it multiplied by 1000 (for milliseconds).
+    // n represents the current retry attempt number (e.g., 1 for the first retry, 2 for the second).
+    // The Fibonacci sequence used here starts F(1)=1, F(2)=1, F(3)=2, F(4)=3, F(5)=5, etc.
+    // (Note: some definitions start F(0)=0, F(1)=1, F(2)=1... this implementation aligns with n=retryCount directly)
+    // So, for n=1 (1st retry), delay is F(1)*1000ms = 1000ms.
+    // For n=2 (2nd retry), delay is F(2)*1000ms = 1000ms.
+    // For n=3 (3rd retry), delay is F(3)*1000ms = 2000ms.
+
     // Use an iterative approach instead of recursive to avoid exponential complexity
-    if (n <= 0) return 0;
-    if (n === 1) return 1000; // 1 second
+    if (n <= 0) return 0; // No delay for n=0 or less (should not happen if n is retryCount)
+    if (n === 1) return 1000; // 1 second for the first retry (F(1))
 
-    let prev = 0;
-    let current = 1;
+    // Initialize Fibonacci sequence state for iterative calculation.
+    // prev corresponds to F(i-2), current corresponds to F(i-1) when calculating F(i).
+    // For the first iteration (i=2, calculating F(2)):
+    // prev = F(0) in a sequence where F(0)=0, F(1)=1.
+    // current = F(1) in that same sequence.
+    let prev = 0; // Represents F(0) if sequence is 0, 1, 1, 2, 3...
+    let current = 1; // Represents F(1)
 
-    // Calculate Fibonacci number iteratively
+    // Loop starts from i=2 because F(0) and F(1) are base cases or handled by n=1 check.
+    // Iteratively calculate F(i) up to F(n).
+    // Example for n=2 (2nd retry, expecting F(2)=1):
+    // i=2: next = prev(0) + current(1) = 1. prev becomes 1, current becomes 1. Loop ends. Returns 1 * 1000.
+    // Example for n=3 (3rd retry, expecting F(3)=2):
+    // i=2: next = prev(0) + current(1) = 1. prev becomes 1, current becomes 1.
+    // i=3: next = prev(1) + current(1) = 2. prev becomes 1, current becomes 2. Loop ends. Returns 2 * 1000.
     for (let i = 2; i <= n; i++) {
       const next = prev + current;
       prev = current;
@@ -494,67 +513,76 @@ export class RobustAxiosClient {
   // Error Handling Methods
   //--------------------------------------------------------------------------
   private handleError(error: AxiosError | Error): Error {
+    let processedError: Error = error; // Start with the original error
+
     if (this.customErrorHandler) {
-      return this.customErrorHandler(error);
+      const customHandlerResult = this.customErrorHandler(error);
+      if (customHandlerResult instanceof Error) {
+        processedError = customHandlerResult; // Use error returned by custom handler
+      }
+      // If customErrorHandler doesn't return an Error, processedError remains the original error.
+      // This allows customErrorHandler to simply log, or modify the error object by reference (if it chooses to).
     }
 
-    // Handle specific error types
+    // Now, proceed with the library's classification logic using processedError
     if (
-      error instanceof RateLimitError ||
-      error instanceof CancellationError ||
-      error instanceof TimeoutError ||
-      error instanceof ValidationError
+      processedError instanceof RateLimitError ||
+      processedError instanceof CancellationError ||
+      processedError instanceof TimeoutError ||
+      processedError instanceof ValidationError
     ) {
-      return error;
+      return processedError; // Already a specific library error, or one returned by custom handler
     }
 
-    if (isAxiosError(error)) {
+    if (isAxiosError(processedError)) { // Make sure to use isAxiosError with processedError
+      const axiosError = processedError as AxiosError; // Type assertion after check
+
       // Handle network errors (no response)
-      if (!error.response) {
+      if (!axiosError.response) {
         // Specific timeout error cases
-        if (error.code === 'ECONNABORTED') {
+        if (axiosError.code === 'ECONNABORTED') {
           return new TimeoutError(
-            `Request timed out after ${error.config?.timeout || 'unknown'}ms`
+            `Request timed out after ${axiosError.config?.timeout || 'unknown'}ms`
           );
         }
 
-        if (error.code === 'ETIMEDOUT') {
+        if (axiosError.code === 'ETIMEDOUT') {
           return new TimeoutError('Connection timed out while waiting for response');
         }
 
-        if (error.code === 'ECONNREFUSED') {
+        if (axiosError.code === 'ECONNREFUSED') {
           return new NetworkError(
-            `Connection refused to ${error.config?.url || 'unknown endpoint'}`,
-            error
+            `Connection refused to ${axiosError.config?.url || 'unknown endpoint'}`,
+            axiosError
           );
         }
 
-        if (error.code === 'ENOTFOUND') {
+        if (axiosError.code === 'ENOTFOUND') {
           return new NetworkError(
-            `Host not found: ${error.config?.url ? new URL(error.config.url).hostname : 'unknown host'}`,
-            error
+            `Host not found: ${axiosError.config?.url ? new URL(axiosError.config.url).hostname : 'unknown host'}`,
+            axiosError
           );
         }
 
-        if (error.code === 'CERT_HAS_EXPIRED') {
-          return new NetworkError('SSL certificate has expired', error);
+        if (axiosError.code === 'CERT_HAS_EXPIRED') {
+          return new NetworkError('SSL certificate has expired', axiosError);
         }
 
-        if (error.message.includes('Network Error')) {
-          return new NetworkError('Network connectivity issue detected', error);
+        if (axiosError.message.includes('Network Error')) {
+          return new NetworkError('Network connectivity issue detected', axiosError);
         }
 
-        return new NetworkError(`Network error occurred: ${error.message}`, error);
+        return new NetworkError(`Network error occurred: ${axiosError.message}`, axiosError);
       }
 
       // Handle response errors
-      const status = error.response.status;
+      const status = axiosError.response.status;
 
       // Client errors (4xx)
       if (status >= 400 && status < 500) {
         if (status === 429) {
           // Try to get retry-after header for more specific message
-          const retryAfter = error.response.headers['retry-after'];
+          const retryAfter = axiosError.response.headers['retry-after'];
           if (retryAfter) {
             return new RateLimitError(`Rate limit exceeded. Retry after ${retryAfter} seconds`);
           }
@@ -565,7 +593,7 @@ export class RobustAxiosClient {
           // Add validation details if available
           try {
             // Safely access potential validation details in response data
-            const data = error.response.data as Record<string, unknown>;
+            const data = axiosError.response.data as Record<string, unknown>;
             const validationDetails = data['errors'] || data['details'];
             if (validationDetails) {
               return new ValidationError(`Validation failed: ${JSON.stringify(validationDetails)}`);
@@ -573,50 +601,50 @@ export class RobustAxiosClient {
           } catch (e) {
             // Ignore JSON parsing errors
           }
-          return new ValidationError(error.message);
+          return new ValidationError(axiosError.message);
         }
 
         if (status === 401) {
-          return new ClientError('Authentication required', status, error.response);
+          return new ClientError('Authentication required', status, axiosError.response);
         }
 
         if (status === 403) {
-          return new ClientError('Permission denied', status, error.response);
+          return new ClientError('Permission denied', status, axiosError.response);
         }
 
         if (status === 404) {
           return new ClientError(
-            `Resource not found: ${error.config?.url || 'unknown'}`,
+            `Resource not found: ${axiosError.config?.url || 'unknown'}`,
             status,
-            error.response
+            axiosError.response
           );
         }
 
-        return new ClientError(error.message || `Client error (${status})`, status, error.response);
+        return new ClientError(axiosError.message || `Client error (${status})`, status, axiosError.response);
       }
 
       // Server errors (5xx)
       if (status >= 500) {
-        return new ServerError(error.message || `Server error (${status})`, status, error.response);
+        return new ServerError(axiosError.message || `Server error (${status})`, status, axiosError.response);
       }
 
       // Fallback to generic HTTP error
-      return new HttpError(error.message, status, error.response);
+      return new HttpError(axiosError.message, status, axiosError.response);
     }
 
     // Handle non-Axios errors with more context
-    if (error instanceof Error) {
-      if (error.message.includes('timeout')) {
-        return new TimeoutError(`Operation timed out: ${error.message}`);
+    if (processedError instanceof Error) { // Check processedError here
+      if (processedError.message.includes('timeout')) {
+        return new TimeoutError(`Operation timed out: ${processedError.message}`);
       }
 
-      if (error.message.includes('network') || error.message.includes('connection')) {
-        return new NetworkError(`Network issue: ${error.message}`, error);
+      if (processedError.message.includes('network') || processedError.message.includes('connection')) {
+        return new NetworkError(`Network issue: ${processedError.message}`, processedError);
       }
     }
 
-    // Unknown error type
-    return error;
+    // Unknown error type - return the processedError
+    return processedError;
   }
 
   //--------------------------------------------------------------------------
@@ -677,65 +705,86 @@ export class RobustAxiosClient {
   //--------------------------------------------------------------------------
   private generateRequestId(config: AxiosRequestConfig): string {
     if (!config) {
-      return `UNKNOWN-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+      // Fallback for cases where config might be missing, though ideally this shouldn't happen in normal flow
+      return `UNKNOWN_NO_CONFIG::${Date.now()}`;
     }
 
-    // Extract components with proper fallbacks
     const method = config.method?.toUpperCase() || 'UNKNOWN';
-    const baseUrl = config.baseURL?.replace(/\/+$/, '') || '';
-    const path = config.url?.replace(/^\/+/, '') || 'unknown';
+    const baseUrl = config.baseURL?.replace(/\/+$/, '') || ''; // Remove trailing slashes
+    const path = config.url?.replace(/^\/+/, '') || ''; // Remove leading slashes
+    
+    // Ensure that baseUrl and path are not both empty, otherwise, it might result in just "https:///"
+    let fullUri = 'unknown_uri';
+    if (baseUrl && path) {
+        fullUri = `${baseUrl}/${path}`;
+    } else if (baseUrl) {
+        fullUri = baseUrl;
+    } else if (path) {
+        fullUri = path;
+    }
 
-    // Normalize URL parts and combine them
-    const fullUri = baseUrl ? `${baseUrl}/${path}` : path;
 
-    // Include params hash if present (helps differentiate GET requests to same endpoint)
-    let paramsComponent = '';
+    let paramsString = '[NO_PARAMS]';
     if (config.params) {
       try {
-        const paramsString = JSON.stringify(config.params);
-        paramsComponent = `-${paramsString.length}-${paramsString.slice(0, 10).replace(/\W/g, '')}`;
+        // Sort keys for consistent order
+        const sortedParams: Record<string, unknown> = {};
+        Object.keys(config.params)
+          .sort()
+          .forEach((key) => {
+            sortedParams[key] = config.params[key];
+          });
+        paramsString = JSON.stringify(sortedParams);
       } catch {
-        // Ignore if params cannot be stringified
+        paramsString = '[UNSTRINGIFIABLE_PARAMS]';
       }
     }
 
-    // Create a timestamp-based component for uniqueness
-    const timestamp = Date.now().toString(36);
-    const randomComponent = Math.random().toString(36).substring(2, 8);
+    let dataString = '[NO_DATA]';
+    if (config.data) {
+      if (typeof config.data === 'string') {
+        dataString = config.data;
+      } else if (
+        typeof config.data === 'object' &&
+        config.data !== null &&
+        !(config.data instanceof FormData) &&
+        !(config.data instanceof Blob) &&
+        !(typeof ReadableStream !== 'undefined' && config.data instanceof ReadableStream)
+      ) {
+        try {
+          // Sort keys for consistent order if it's a plain object
+          const sortedData: Record<string, unknown> = {};
+          Object.keys(config.data)
+            .sort()
+            .forEach((key) => {
+              sortedData[key] = config.data[key];
+            });
+          dataString = JSON.stringify(sortedData);
+        } catch {
+          dataString = '[UNSTRINGIFIABLE_DATA]';
+        }
+      } else {
+        dataString = '[NON_PLAIN_OBJECT_DATA]';
+      }
+    }
 
-    return `${method}-${fullUri}${paramsComponent}-${timestamp}${randomComponent}`;
+    // Truncate dataString if too long to prevent excessively long keys
+    if (dataString.length > 256) {
+      dataString = dataString.substring(0, 256) + '[TRUNCATED]';
+    }
+
+    return `${method}::${fullUri}::${paramsString}::${dataString}`;
   }
 
   private getRetryContext(config?: AxiosRequestConfig): RetryContext | undefined {
     if (!config) return undefined;
 
-    // Generate the exact request ID
+    // Generate the request ID using the new deterministic logic
     const requestId = this.generateRequestId(config);
 
-    // Try to find the context by exact ID - this will also mark it as recently used in the LRU cache
-    const context = this.retryContexts.get(requestId);
-
-    // If found, return it
-    if (context) return context;
-
-    // If not found by exact ID, look through all contexts
-    // This helps in tests where mocks might create slightly different configs
-    let fallbackContext: RetryContext | undefined;
-
-    this.retryContexts.forEach((ctx, id) => {
-      if (
-        !fallbackContext &&
-        ctx.requestConfig.method === config.method &&
-        ctx.requestConfig.url === config.url
-      ) {
-        fallbackContext = ctx;
-        // Update the key to mark this as recently used
-        this.retryContexts.delete(id);
-        this.retryContexts.set(id, ctx);
-      }
-    });
-
-    return fallbackContext;
+    // Perform a direct lookup using the generated ID
+    // The LRU cache's get method typically handles marking the item as recently used.
+    return this.retryContexts.get(requestId);
   }
 
   private removeRetryContext(config?: AxiosRequestConfig): void {

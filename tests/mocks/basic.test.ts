@@ -25,7 +25,6 @@ describe('Robust Axios Client with Mocks', () => {
   
   afterEach(() => {
     axiosMock.reset();
-    RobustAxiosFactory._resetForTesting();
   });
   
   test('should return mocked response for specific URL', async () => {

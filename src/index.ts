@@ -35,7 +35,7 @@ export { DEFAULT_RETRY_CONFIG } from './constants';
 // Create and export RobustAxios as the default export (for backward compatibility)
 const RobustAxios = RobustAxiosFactory;
 
-// Initialize default instance (don't need to store reference as it's managed by the factory)
+// Initialize default instance
 RobustAxiosFactory.getDefaultInstance();
 
 // Export default instance and factory

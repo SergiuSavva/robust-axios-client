@@ -3,9 +3,8 @@ import { server, mockLogger } from './setup';
 import RobustAxiosFactory, { ClientError, ServerError, TimeoutError } from '../../src';
 
 describe('Robust Axios Client with MSW - Basic Tests', () => {
-  // Reset the RobustAxiosFactory and handlers after each test
+  // Reset the handlers after each test
   afterEach(() => {
-    RobustAxiosFactory._resetForTesting();
     server.resetHandlers();
   });
 

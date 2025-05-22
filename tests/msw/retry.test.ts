@@ -4,9 +4,8 @@ import { mockLogger } from './setup';
 import RobustAxiosFactory from '../../src';
 
 describe('Robust Axios Client with MSW - Retry Tests', () => {
-  // Reset the RobustAxiosFactory and handlers after each test
+  // Reset the handlers after each test
   afterEach(() => {
-    RobustAxiosFactory._resetForTesting();
     server.resetHandlers();
   });
 

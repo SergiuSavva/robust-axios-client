@@ -6,9 +6,22 @@ import { RobustAxiosConfig } from '../types';
  * Factory class for creating and managing RobustAxios instances
  */
 export class RobustAxiosFactory {
-  // Static reference to default instance for testing/cleanup
   private static _defaultInstance: RobustAxiosClient | null = null;
 
+  public static getDefaultInstance(): RobustAxiosClient {
+    if (!RobustAxiosFactory._defaultInstance) {
+      RobustAxiosFactory._defaultInstance = new RobustAxiosClient({}); // Using sensible default config
+    }
+    return RobustAxiosFactory._defaultInstance;
+  }
+
+  public static _resetForTesting(): void {
+    if (RobustAxiosFactory._defaultInstance) {
+      RobustAxiosFactory._defaultInstance.destroy(); 
+      RobustAxiosFactory._defaultInstance = null;
+    }
+  }
+  
   /**
    * Creates a new instance of RobustAxiosClient with the provided configuration.
    *
@@ -36,23 +49,7 @@ export class RobustAxiosFactory {
     return new RobustAxiosClient(config);
   }
 
-  // Method to reset all static instances for testing
-  public static _resetForTesting(): void {
-    if (RobustAxiosFactory._defaultInstance) {
-      RobustAxiosFactory._defaultInstance.destroy();
-      RobustAxiosFactory._defaultInstance = null;
-    }
-  }
-
-  // Get default instance, create if doesn't exist
-  public static getDefaultInstance(): RobustAxiosClient {
-    if (!RobustAxiosFactory._defaultInstance) {
-      RobustAxiosFactory._defaultInstance = new RobustAxiosClient({ baseURL: '' });
-    }
-    return RobustAxiosFactory._defaultInstance;
-  }
-
-  // Static methods that delegate to the default instance
+  // Static HTTP methods delegating to the default instance
   public static request<T = unknown>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
     return RobustAxiosFactory.getDefaultInstance().request<T>(config);
   }
@@ -109,7 +106,20 @@ export class RobustAxiosFactory {
     return RobustAxiosFactory.getDefaultInstance().patch<T>(url, data, config);
   }
 
-  // Additional static methods
+  // Other static utility methods delegating to the default instance
+  public static getUri(config?: AxiosRequestConfig): string {
+    return RobustAxiosFactory.getDefaultInstance().getUri(config);
+  }
+
+  public static setDefaultHeader(key: string, value: string): void {
+    RobustAxiosFactory.getDefaultInstance().setDefaultHeader(key, value);
+  }
+
+  public static updateConfig(newConfig: AxiosRequestConfig): void {
+    RobustAxiosFactory.getDefaultInstance().updateConfig(newConfig);
+  }
+  
+  // Kept existing additional static methods
   public static all<T>(values: Array<T | Promise<T>>): Promise<T[]> {
     return axios.all(values);
   }
@@ -128,16 +138,4 @@ export class RobustAxiosFactory {
 
   public static CancelToken = axios.CancelToken;
   public static Cancel = axios.Cancel;
-
-  public static getUri(config?: AxiosRequestConfig): string {
-    return RobustAxiosFactory.getDefaultInstance().getUri(config);
-  }
-
-  public static setDefaultHeader(key: string, value: string): void {
-    return RobustAxiosFactory.getDefaultInstance().setDefaultHeader(key, value);
-  }
-
-  public static updateConfig(newConfig: AxiosRequestConfig): void {
-    return RobustAxiosFactory.getDefaultInstance().updateConfig(newConfig);
-  }
 }
