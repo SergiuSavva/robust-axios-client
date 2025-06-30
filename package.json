@@ -103,7 +103,7 @@
   },
   "homepage": "https://github.com/SergiuSavva/robust-axios-client#readme",
   "engines": {
-    "node": ">=16.0.0",
+    "node": ">=18.0.0",
     "npm": ">=8.0.0"
   },
   "publishConfig": {
