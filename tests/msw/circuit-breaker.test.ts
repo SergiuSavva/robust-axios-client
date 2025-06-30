@@ -206,4 +206,166 @@ describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
     expect(mockLogger.error).toHaveBeenCalled();
     // Circuit breaker prevents the request from being made, so no request log
   });
+
+  test('circuit breaker should properly transition from HALF_OPEN to CLOSED after successful tests', async () => {
+    const stateChanges: CircuitBreakerState[] = [];
+    let apiCallCount = 0;
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      retry: {
+        maxRetries: 0,
+        circuitBreaker: {
+          failureThreshold: 2,      // Open after 2 failures
+          resetTimeout: 100,        // Short timeout for quick testing
+          halfOpenMaxRequests: 2    // Allow 2 test requests in half-open state
+        },
+        onCircuitBreakerStateChange: (newState) => {
+          stateChanges.push(newState);
+        }
+      }
+    });
+
+    // First, let's open the circuit breaker by making failing requests
+    server.use(
+      http.get('https://example.com/api/half-open-limit', () => {
+        return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+      }, { once: true })
+    );
+    server.use(
+      http.get('https://example.com/api/half-open-limit', () => {
+        return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+      }, { once: true })
+    );
+
+    // Make 2 requests to trigger the circuit breaker to OPEN
+    await expect(client.get('/api/half-open-limit')).rejects.toThrow();
+    await expect(client.get('/api/half-open-limit')).rejects.toThrow();
+    
+    // Verify circuit is OPEN
+    expect(stateChanges).toContain('OPEN');
+    
+    // Wait for the circuit breaker to transition to HALF_OPEN
+    await new Promise(resolve => setTimeout(resolve, 150));
+    
+    // Reset API call counter for HALF_OPEN testing
+    apiCallCount = 0;
+    const resolveResponses: Array<() => void> = [];
+    
+    // Now switch to success responses for HALF_OPEN testing  
+    // Use manual control to ensure all requests start before any complete
+    server.resetHandlers();
+    server.use(
+      http.get('https://example.com/api/half-open-limit', async () => {
+        apiCallCount++;
+        
+        // Wait for manual signal before returning response
+        await new Promise<void>(resolve => {
+          resolveResponses.push(resolve);
+        });
+        
+        return HttpResponse.json({ message: 'Success', callCount: apiCallCount }, { status: 200 });
+      })
+    );
+    
+    // Make multiple requests concurrently
+    const request1 = client.get('/api/half-open-limit');
+    const request2 = client.get('/api/half-open-limit'); 
+    const request3 = client.get('/api/half-open-limit');
+    
+    // Wait a bit to ensure all requests have started
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Now release all responses at once
+    resolveResponses.forEach(resolve => resolve());
+    
+    const results = await Promise.allSettled([request1, request2, request3]);
+    
+    // Should have 3 results
+    expect(results).toHaveLength(3);
+    
+    // All requests should succeed (this is correct circuit breaker behavior)
+    expect(results[0]?.status).toBe('fulfilled');
+    expect(results[1]?.status).toBe('fulfilled');
+    expect(results[2]?.status).toBe('fulfilled');
+    
+    // Wait a bit for state transitions to complete
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Verify state transitions - should transition to CLOSED after successful tests
+    expect(stateChanges).toEqual(expect.arrayContaining(['OPEN', 'HALF_OPEN', 'CLOSED']));
+    
+    // Verify that exactly 3 API calls were made (2 test + 1 normal)
+    expect(apiCallCount).toBe(3);
+  });
+
+  test('circuit breaker should limit requests in HALF_OPEN state', async () => {
+    const stateChanges: CircuitBreakerState[] = [];
+    let apiCallCount = 0;
+    
+    const client = RobustAxiosFactory.create({
+      baseURL: 'https://example.com',
+      retry: {
+        maxRetries: 0,
+        circuitBreaker: {
+          failureThreshold: 2,      // Open after 2 failures
+          resetTimeout: 100,        // Short timeout for quick testing
+          halfOpenMaxRequests: 1    // Allow only 1 test request in half-open state
+        },
+        onCircuitBreakerStateChange: (newState) => {
+          stateChanges.push(newState);
+        }
+      }
+    });
+
+    // First, let's open the circuit breaker by making failing requests
+    server.use(
+      http.get('https://example.com/api/half-open-simple', () => {
+        return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+      }, { once: true })
+    );
+    server.use(
+      http.get('https://example.com/api/half-open-simple', () => {
+        return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
+      }, { once: true })
+    );
+
+    // Make 2 requests to trigger the circuit breaker to OPEN
+    await expect(client.get('/api/half-open-simple')).rejects.toThrow();
+    await expect(client.get('/api/half-open-simple')).rejects.toThrow();
+    
+    // Verify circuit is OPEN
+    expect(stateChanges).toContain('OPEN');
+    
+    // Wait for the circuit breaker to transition to HALF_OPEN
+    await new Promise(resolve => setTimeout(resolve, 150));
+    
+    // Reset API call counter and set up success responses
+    apiCallCount = 0;
+    server.resetHandlers();
+    server.use(
+      http.get('https://example.com/api/half-open-simple', () => {
+        apiCallCount++;
+        return HttpResponse.json({ message: 'Success', callCount: apiCallCount }, { status: 200 });
+      })
+    );
+    
+    // Make first request - should succeed
+    const response1 = await client.get('/api/half-open-simple');
+    expect(response1.status).toBe(200);
+    
+    // Wait for potential state transition
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Should have transitioned to CLOSED after successful test
+    expect(stateChanges).toEqual(expect.arrayContaining(['OPEN', 'HALF_OPEN', 'CLOSED']));
+    
+    // Verify only 1 API call was made during HALF_OPEN
+    expect(apiCallCount).toBe(1);
+    
+    // Further requests should succeed in CLOSED state
+    const response2 = await client.get('/api/half-open-simple');
+    expect(response2.status).toBe(200);
+    expect(apiCallCount).toBe(2);
+  });
 }); 

@@ -51,6 +51,7 @@
     "example:basic": "npx tsx examples/basic-usage.ts",
     "example:rate-limit": "npx tsx examples/rate-limit-example.ts",
     "example:circuit-breaker": "npx tsx examples/circuit-breaker-example.ts",
+    "example:hooks": "npx tsx examples/hooks-example.ts",
     "examples": "npm run build && npm run example:demo"
   },
   "dependencies": {
