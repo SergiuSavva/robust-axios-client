@@ -2,11 +2,11 @@
   "compilerOptions": {
     // Project Options
     "target": "ES2020",
-    "module": "ES2020",
+    "module": "ESNext",
     "lib": ["ES2020", "DOM"],
     "outDir": "dist/esm",
     "rootDir": "src",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "baseUrl": "src",
     "paths": {
       "*": ["*"]
@@ -47,8 +47,8 @@
     // Advanced
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "composite": true,
-    "incremental": true,
+    "composite": false,
+    "incremental": false,
     "tsBuildInfoFile": "dist/esm/.tsbuildinfo"
   },
   "include": ["src/**/*"],

@@ -43,6 +43,15 @@ jobs:
           registry-url: 'https://registry.npmjs.org/'
           cache: 'npm'
           
+      - name: Verify npm version
+        run: |
+          NPM_VERSION=$(npm --version)
+          echo "NPM version: $NPM_VERSION"
+          if ! npx semver $NPM_VERSION -r ">=8.0.0"; then
+            echo "::error::NPM version $NPM_VERSION does not meet requirement >=8.0.0"
+            exit 1
+          fi
+          
       - name: Configure Git
         run: |
           git config user.name "${GITHUB_ACTOR}"
@@ -52,7 +61,7 @@ jobs:
         run: npm ci
         
       - name: Run tests
-        run: npm test
+        run: npm run test:ci
         
       - name: Run lint
         run: npm run lint
@@ -73,12 +82,20 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           if grep -q "img.shields.io/npm/v/robust-axios-client" README.md; then
             sed -i -E 's|img.shields.io/npm/v/robust-axios-client(/v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?)?|img.shields.io/npm/v/robust-axios-client/v'"${VERSION}"'|g' README.md
+            echo "README badge updated to version $VERSION"
+          else
+            echo "No npm version badge found in README.md"
           fi
           
       - name: Commit changes
         run: |
           git add package.json package-lock.json README.md
-          git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: release v${{ steps.version.outputs.version }}"
+            echo "Changes committed"
+          fi
           
       - name: Create Tag
         uses: rickstaa/action-create-tag@v1
@@ -90,16 +107,17 @@ jobs:
         id: changelog
         run: |
           if [ -f .github/changelog-configuration.json ]; then
-            echo "Using changelog configuration"
+            echo "Using existing changelog configuration"
           else
+            echo "Creating default changelog configuration"
+            mkdir -p .github
             echo '{"categories": [{"title": "## 🚀 Features","labels": ["feature","enhancement"]},{"title": "## 🐛 Fixes","labels": ["fix","bug"]},{"title": "## 🧪 Tests","labels": ["test"]},{"title": "## 📚 Documentation","labels": ["documentation"]},{"title": "## 🧰 Maintenance","labels": ["chore","dependencies"]}],"ignore_labels": ["ignore"],"sort": "ASC","template": "${{'{{'}}CHANGELOG{{'}}'}}","pr_template": "- ${{'{{'}}TITLE{{'}}'}} (#${{'{{'}}NUMBER{{'}}'}}","empty_template": "No changes"}' > .github/changelog-configuration.json
           fi
           
-      - uses: mikepenz/release-changelog-builder-action@v4
+      - uses: mikepenz/release-changelog-builder-action@v5
         id: build_changelog
         with:
-          configurationFile: .github/changelog-configuration.json
-          outputFile: .github/CHANGELOG.md
+          configuration: .github/changelog-configuration.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
@@ -122,13 +140,15 @@ jobs:
         with:
           tag: "v${{ steps.version.outputs.version }}"
           name: "Release v${{ steps.version.outputs.version }}"
-          bodyFile: ".github/CHANGELOG.md"
+          body: ${{ steps.build_changelog.outputs.changelog }}
           draft: false
           prerelease: ${{ contains(github.event.inputs.version, 'pre') }}
           token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Push changes
-        run: git push --follow-tags
+        run: |
+          git push --follow-tags
+          echo "Changes and tags pushed to repository"
           
       - name: Publish to NPM
         run: |
@@ -140,5 +160,6 @@ jobs:
           
           echo "Publishing to NPM with tag: ${{ steps.npm_tag.outputs.tag }}"
           npm publish --provenance --access public --tag ${{ steps.npm_tag.outputs.tag }}
+          echo "Package published successfully!"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

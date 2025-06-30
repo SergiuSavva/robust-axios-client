@@ -9,45 +9,34 @@
       "labels": ["fix", "bug", "bugfix"]
     },
     {
-      "title": "## 📦 Dependencies",
-      "labels": ["dependencies", "deps", "dependency"]
+      "title": "## 🧪 Tests",
+      "labels": ["test", "testing"]
     },
     {
-      "title": "## 📝 Documentation",
+      "title": "## 📚 Documentation",
       "labels": ["documentation", "docs"]
     },
     {
-      "title": "## ⚡️ Performance",
+      "title": "## 🧰 Maintenance",
+      "labels": ["chore", "dependencies", "deps"]
+    },
+    {
+      "title": "## ⚡ Performance",
       "labels": ["performance", "perf"]
-    },
-    {
-      "title": "## 🔄 Refactoring",
-      "labels": ["refactor", "refactoring"]
-    },
-    {
-      "title": "## 🧪 Tests",
-      "labels": ["test", "tests"]
-    },
-    {
-      "title": "## 🔧 CI/CD",
-      "labels": ["ci", "cd", "ci/cd", "build"]
-    },
-    {
-      "title": "## 🔄 Other Changes",
-      "labels": []
     }
   ],
-  "ignore_labels": [
-    "skip-changelog", "no-changelog"
-  ],
+  "ignore_labels": ["ignore", "wip", "duplicate"],
   "sort": {
     "order": "ASC",
-    "on_property": "merge_date"
+    "on_property": "mergedAt"
   },
-  "template": "${{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n${{UNCATEGORIZED}}\n</details>",
-  "empty_template": "No changes in this release",
-  "pr_template": "- ${{TITLE}} (#${{NUMBER}})",
-  "trim_values": true,
-  "max_pull_requests": 1000,
-  "max_back_track_time_days": 1000
+  "template": "#{{CHANGELOG}}\n\n<details>\n<summary>🔗 Full Changelog</summary>\n\n#{{UNCATEGORIZED}}\n</details>",
+  "pr_template": "- #{{TITLE}} ([#{{NUMBER}}](#{{URL}})) by @#{{AUTHOR}}",
+  "empty_template": "- No changes in this release",
+  "transformers": [
+    {
+      "pattern": "\\[skip ci\\]",
+      "target": ""
+    }
+  ]
 } 
