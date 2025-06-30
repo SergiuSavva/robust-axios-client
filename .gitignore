@@ -27,6 +27,10 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 
+# Local testing with act
+.secrets.local
+.actrc.local
+
 # IDE - VSCode
 .vscode/*
 !.vscode/settings.json
@@ -112,3 +116,5 @@ pids
 
 # Yarn Integrity file
 .yarn-integrity
+
+.rollup.cache/
