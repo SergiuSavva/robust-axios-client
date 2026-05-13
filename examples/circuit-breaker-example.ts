@@ -40,7 +40,7 @@ async function main() {
   for (let i = 0; i < 5; i++) {
     try {
       await makeRequest(badEndpoint);
-    } catch (error) {
+    } catch {
       // Continue after errors
       console.log('Continuing after error...');
     }
@@ -52,7 +52,7 @@ async function main() {
   // Now try a valid request
   try {
     await makeRequest('/posts/1');
-  } catch (error) {
+  } catch {
     console.log('Valid request rejected due to circuit breaker');
   }
   
@@ -63,7 +63,7 @@ async function main() {
   try {
     await makeRequest('/posts/1');
     console.log('Success! Circuit breaker has reset.');
-  } catch (error) {
+  } catch {
     console.log('Request still failing after circuit reset');
   }
 }

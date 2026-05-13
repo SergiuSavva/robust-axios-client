@@ -36,6 +36,21 @@ function isAxiosError(error: unknown): error is AxiosError {
   return axios.isAxiosError(error);
 }
 
+// Key used to tag a request config with the ID of its retry context, so the
+// same context is reused across retries instead of a new one being created
+// each time the request re-enters the interceptor chain.
+const REQUEST_ID_KEY = '__robustAxiosRequestId';
+
+type TaggedConfig = AxiosRequestConfig & { [REQUEST_ID_KEY]?: string };
+
+function getTaggedRequestId(config?: AxiosRequestConfig): string | undefined {
+  return (config as TaggedConfig | undefined)?.[REQUEST_ID_KEY];
+}
+
+function setTaggedRequestId(config: AxiosRequestConfig, id: string): void {
+  (config as TaggedConfig)[REQUEST_ID_KEY] = id;
+}
+
 export class RobustAxiosClient {
   //--------------------------------------------------------------------------
   // Private Properties
@@ -259,18 +274,22 @@ export class RobustAxiosClient {
       throw new RateLimitError('Rate limit exceeded');
     }
 
-    // Track request for retry context
-    const requestId = this.generateRequestId(config);
-    this.retryContexts.set(requestId, {
-      retryCount: 0,
-      startTime: Date.now(),
-      attempts: [],
-      requestConfig: config,
-      category: this.determineRequestCategory(config),
-    });
-
-    // Cleanup old contexts based on age
-    this.cleanupRetryContexts();
+    // Reuse the existing retry context if this config has already been
+    // tagged with one (i.e. this is a retry). Otherwise create a fresh
+    // context and tag the config so subsequent retries find it again.
+    const existingId = getTaggedRequestId(config);
+    if (!existingId || !this.retryContexts.get(existingId)) {
+      const requestId = this.generateRequestId();
+      setTaggedRequestId(config, requestId);
+      this.retryContexts.set(requestId, {
+        retryCount: 0,
+        startTime: Date.now(),
+        attempts: [],
+        requestConfig: config,
+        category: this.determineRequestCategory(config),
+      });
+      this.cleanupRetryContexts();
+    }
 
     this.logRequest(config);
     return config;
@@ -570,7 +589,7 @@ export class RobustAxiosClient {
             if (validationDetails) {
               return new ValidationError(`Validation failed: ${JSON.stringify(validationDetails)}`);
             }
-          } catch (e) {
+          } catch {
             // Ignore JSON parsing errors
           }
           return new ValidationError(error.message);
@@ -675,72 +694,19 @@ export class RobustAxiosClient {
   //--------------------------------------------------------------------------
   // Context Management Methods
   //--------------------------------------------------------------------------
-  private generateRequestId(config: AxiosRequestConfig): string {
-    if (!config) {
-      return `UNKNOWN-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-    }
-
-    // Extract components with proper fallbacks
-    const method = config.method?.toUpperCase() || 'UNKNOWN';
-    const baseUrl = config.baseURL?.replace(/\/+$/, '') || '';
-    const path = config.url?.replace(/^\/+/, '') || 'unknown';
-
-    // Normalize URL parts and combine them
-    const fullUri = baseUrl ? `${baseUrl}/${path}` : path;
-
-    // Include params hash if present (helps differentiate GET requests to same endpoint)
-    let paramsComponent = '';
-    if (config.params) {
-      try {
-        const paramsString = JSON.stringify(config.params);
-        paramsComponent = `-${paramsString.length}-${paramsString.slice(0, 10).replace(/\W/g, '')}`;
-      } catch {
-        // Ignore if params cannot be stringified
-      }
-    }
-
-    // Create a timestamp-based component for uniqueness
-    const timestamp = Date.now().toString(36);
-    const randomComponent = Math.random().toString(36).substring(2, 8);
-
-    return `${method}-${fullUri}${paramsComponent}-${timestamp}${randomComponent}`;
+  private generateRequestId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 10)}`;
   }
 
   private getRetryContext(config?: AxiosRequestConfig): RetryContext | undefined {
-    if (!config) return undefined;
-
-    // Generate the exact request ID
-    const requestId = this.generateRequestId(config);
-
-    // Try to find the context by exact ID - this will also mark it as recently used in the LRU cache
-    const context = this.retryContexts.get(requestId);
-
-    // If found, return it
-    if (context) return context;
-
-    // If not found by exact ID, look through all contexts
-    // This helps in tests where mocks might create slightly different configs
-    let fallbackContext: RetryContext | undefined;
-
-    this.retryContexts.forEach((ctx, id) => {
-      if (
-        !fallbackContext &&
-        ctx.requestConfig.method === config.method &&
-        ctx.requestConfig.url === config.url
-      ) {
-        fallbackContext = ctx;
-        // Update the key to mark this as recently used
-        this.retryContexts.delete(id);
-        this.retryContexts.set(id, ctx);
-      }
-    });
-
-    return fallbackContext;
+    const requestId = getTaggedRequestId(config);
+    if (!requestId) return undefined;
+    return this.retryContexts.get(requestId);
   }
 
   private removeRetryContext(config?: AxiosRequestConfig): void {
-    if (!config) return;
-    const requestId = this.generateRequestId(config);
+    const requestId = getTaggedRequestId(config);
+    if (!requestId) return;
     this.retryContexts.delete(requestId);
   }
 

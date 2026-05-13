@@ -210,7 +210,7 @@ describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
   test('circuit breaker should properly transition from HALF_OPEN to CLOSED after successful tests', async () => {
     const stateChanges: CircuitBreakerState[] = [];
     let apiCallCount = 0;
-    
+
     const client = RobustAxiosFactory.create({
       baseURL: 'https://example.com',
       retry: {
@@ -226,7 +226,7 @@ describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
       }
     });
 
-    // First, let's open the circuit breaker by making failing requests
+    // Open the circuit by failing twice.
     server.use(
       http.get('https://example.com/api/half-open-limit', () => {
         return HttpResponse.json({ error: 'Server Error' }, { status: 500 });
@@ -238,64 +238,71 @@ describe('Robust Axios Client with MSW - Circuit Breaker Tests', () => {
       }, { once: true })
     );
 
-    // Make 2 requests to trigger the circuit breaker to OPEN
     await expect(client.get('/api/half-open-limit')).rejects.toThrow();
     await expect(client.get('/api/half-open-limit')).rejects.toThrow();
-    
-    // Verify circuit is OPEN
+
     expect(stateChanges).toContain('OPEN');
-    
-    // Wait for the circuit breaker to transition to HALF_OPEN
+
+    // Wait for OPEN → HALF_OPEN
     await new Promise(resolve => setTimeout(resolve, 150));
-    
-    // Reset API call counter for HALF_OPEN testing
+
     apiCallCount = 0;
     const resolveResponses: Array<() => void> = [];
-    
-    // Now switch to success responses for HALF_OPEN testing  
-    // Use manual control to ensure all requests start before any complete
+
+    // Switch to success responses; hold them open to force concurrency.
     server.resetHandlers();
     server.use(
       http.get('https://example.com/api/half-open-limit', async () => {
         apiCallCount++;
-        
-        // Wait for manual signal before returning response
         await new Promise<void>(resolve => {
           resolveResponses.push(resolve);
         });
-        
         return HttpResponse.json({ message: 'Success', callCount: apiCallCount }, { status: 200 });
       })
     );
-    
-    // Make multiple requests concurrently
+
+    // Fire 3 concurrent requests while HALF_OPEN with halfOpenMaxRequests=2.
+    // Only the first 2 should be admitted as test probes; the 3rd must be
+    // rejected with "Circuit breaker is open".
     const request1 = client.get('/api/half-open-limit');
-    const request2 = client.get('/api/half-open-limit'); 
+    const request2 = client.get('/api/half-open-limit');
     const request3 = client.get('/api/half-open-limit');
-    
-    // Wait a bit to ensure all requests have started
+    // Attach allSettled synchronously so the 3rd request's rejection is
+    // observed immediately and not flagged as unhandled by Node.
+    const settled = Promise.allSettled([request1, request2, request3]);
+
+    // Let interceptors run so beforeRequest() is decided for all three.
     await new Promise(resolve => setTimeout(resolve, 10));
-    
-    // Now release all responses at once
+
+    // Release responses for the admitted probes.
     resolveResponses.forEach(resolve => resolve());
-    
-    const results = await Promise.allSettled([request1, request2, request3]);
-    
-    // Should have 3 results
+
+    const results = await settled;
+
     expect(results).toHaveLength(3);
-    
-    // All requests should succeed (this is correct circuit breaker behavior)
-    expect(results[0]?.status).toBe('fulfilled');
-    expect(results[1]?.status).toBe('fulfilled');
-    expect(results[2]?.status).toBe('fulfilled');
-    
-    // Wait a bit for state transitions to complete
+    const fulfilled = results.filter(r => r.status === 'fulfilled');
+    const rejected = results.filter(r => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(2);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(/Circuit breaker is open/);
+
+    // Allow state transition microtasks to flush.
     await new Promise(resolve => setTimeout(resolve, 10));
-    
-    // Verify state transitions - should transition to CLOSED after successful tests
+
     expect(stateChanges).toEqual(expect.arrayContaining(['OPEN', 'HALF_OPEN', 'CLOSED']));
-    
-    // Verify that exactly 3 API calls were made (2 test + 1 normal)
+    // Only the 2 admitted probes hit the server.
+    expect(apiCallCount).toBe(2);
+
+    // Now that the circuit is CLOSED, a follow-up request must pass through.
+    server.resetHandlers();
+    server.use(
+      http.get('https://example.com/api/half-open-limit', () => {
+        apiCallCount++;
+        return HttpResponse.json({ message: 'Success', callCount: apiCallCount }, { status: 200 });
+      })
+    );
+    const followUp = await client.get('/api/half-open-limit');
+    expect(followUp.status).toBe(200);
     expect(apiCallCount).toBe(3);
   });
 
