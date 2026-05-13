@@ -7,10 +7,6 @@
     "outDir": "dist/esm",
     "rootDir": "src",
     "moduleResolution": "bundler",
-    "baseUrl": "src",
-    "paths": {
-      "*": ["*"]
-    },
 
     // Strict Checks
     "strict": true,
@@ -33,7 +29,9 @@
     "sourceMap": true,
     "removeComments": false,
     "importHelpers": true,
-    "importsNotUsedAsValues": "remove",
+    // `verbatimModuleSyntax` is the modern replacement for the
+    // deprecated `importsNotUsedAsValues: "remove"` setting (TS 5+).
+    "verbatimModuleSyntax": false,
 
     // Type Checking
     "noUnusedLocals": true,

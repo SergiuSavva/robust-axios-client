@@ -4,7 +4,6 @@ import { RobustAxiosClient } from '../../src/core/RobustAxiosClient';
 // to test directly. A thin test subclass exposes it.
 class TestableClient extends RobustAxiosClient {
   callNextTimeout(current: number, retry: number): number {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this as any).calculateNextTimeout(current, retry);
   }
 }

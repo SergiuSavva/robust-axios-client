@@ -5,7 +5,6 @@ import { RetryContext } from '../../src/types';
 
 class TestableClient extends RobustAxiosClient {
   callCalculate(context: RetryContext, error: AxiosError): number {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this as any).calculateRetryDelay(context, error);
   }
 }
@@ -40,7 +39,7 @@ describe("default customBackoff (sentinel for 'custom' without an override)", ()
     );
   });
 
-  it("invokes the user-provided customBackoff when supplied", () => {
+  it('invokes the user-provided customBackoff when supplied', () => {
     const customBackoff = jest.fn((retryCount: number) => retryCount * 250);
     const client = new TestableClient({
       baseURL: 'https://example.com',
@@ -50,14 +49,14 @@ describe("default customBackoff (sentinel for 'custom' without an override)", ()
     expect(customBackoff).toHaveBeenCalledWith(4, expect.any(Object));
   });
 
-  it("is never consulted when backoffStrategy is a built-in (default behavior)", () => {
+  it('is never consulted when backoffStrategy is a built-in (default behavior)', () => {
     // The default DEFAULT_RETRY_CONFIG.backoffStrategy is 'exponential',
     // so the default customBackoff (which throws) must not fire.
     const client = new TestableClient({ baseURL: 'https://example.com' });
     expect(() => client.callCalculate(makeContext(1), makeError())).not.toThrow();
   });
 
-  it("the exported DEFAULT_RETRY_CONFIG keeps customBackoff as a throwing sentinel", () => {
+  it('the exported DEFAULT_RETRY_CONFIG keeps customBackoff as a throwing sentinel', () => {
     expect(() => DEFAULT_RETRY_CONFIG.customBackoff(1, makeError())).toThrow();
   });
 });

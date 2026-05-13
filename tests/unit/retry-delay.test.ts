@@ -7,23 +7,25 @@ import { RetryContext } from '../../src/types';
 // is the cleanest way to assert it without rebuilding a whole request.
 class TestableClient extends RobustAxiosClient {
   callCalculate(context: RetryContext, error: AxiosError): number {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this as any).calculateRetryDelay(context, error);
   }
   callParse(value: unknown): number | null {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (this as any).parseRetryAfter(value);
   }
 }
 
-const makeError = (status: number | undefined, headers: Record<string, string> = {}): AxiosError => {
+const makeError = (
+  status: number | undefined,
+  headers: Record<string, string> = {}
+): AxiosError => {
   const cfg = { method: 'GET', headers: new AxiosHeaders() } as InternalAxiosRequestConfig;
   return {
     isAxiosError: true,
     config: cfg,
-    response: status !== undefined
-      ? ({ status, headers, data: {}, statusText: '', config: cfg } as never)
-      : undefined,
+    response:
+      status !== undefined
+        ? ({ status, headers, data: {}, statusText: '', config: cfg } as never)
+        : undefined,
     name: 'AxiosError',
     message: 'test',
     toJSON: () => ({}),
