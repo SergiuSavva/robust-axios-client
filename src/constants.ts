@@ -1,5 +1,10 @@
 import { RetryConfig } from './types';
 
+// Best-practice default request timeout. axios's own default is 0
+// (infinite), which is the most common production footgun in axios
+// usage. Users opt out by passing `timeout: 0` explicitly.
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
 // Default retry configuration
 export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
   maxRetries: 3,

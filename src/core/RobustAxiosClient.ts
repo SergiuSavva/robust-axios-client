@@ -29,7 +29,7 @@ import { ConsoleLogger } from '../utils/logger';
 import { LRUCache } from '../utils/lru-cache';
 
 // Import constants
-import { DEFAULT_RETRY_CONFIG } from '../constants';
+import { DEFAULT_RETRY_CONFIG, DEFAULT_TIMEOUT_MS } from '../constants';
 
 // Custom type guard for AxiosError
 function isAxiosError(error: unknown): error is AxiosError {
@@ -71,7 +71,11 @@ export class RobustAxiosClient {
   // Lifecycle Methods
   //--------------------------------------------------------------------------
   constructor(config: RobustAxiosConfig) {
-    this.axiosInstance = axios.create(config);
+    // Inject a default timeout when the user hasn't set one. Passing
+    // `timeout: 0` (or any explicit value, incl. Infinity) opts out.
+    const axiosConfig: RobustAxiosConfig =
+      config.timeout === undefined ? { timeout: DEFAULT_TIMEOUT_MS, ...config } : config;
+    this.axiosInstance = axios.create(axiosConfig);
     this.logger = config.logger ?? new ConsoleLogger();
     this.dryRun = config.dryRun ?? false;
     this.debug = config.debug ?? false;
