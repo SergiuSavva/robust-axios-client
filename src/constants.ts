@@ -45,7 +45,17 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
     halfOpenMaxRequests: 3,
   },
   backoffStrategy: 'exponential',
-  customBackoff: (retryCount) => retryCount * 1000,
+  // Sentinel default: only consulted when the user picks
+  // `backoffStrategy: 'custom'`. If they forgot to also supply their
+  // own `customBackoff`, fail loudly rather than silently falling
+  // back to a meaningless 1000ms-per-retry default.
+  customBackoff: () => {
+    throw new Error(
+      "backoffStrategy is 'custom' but no customBackoff function was provided. " +
+        'Pass `retry: { backoffStrategy: "custom", customBackoff: (retryCount, error) => ms }` ' +
+        'or pick a built-in strategy ("exponential" | "linear" | "fibonacci").'
+    );
+  },
   onRetry: () => {},
   onSuccess: () => {},
   onFailed: () => {},
