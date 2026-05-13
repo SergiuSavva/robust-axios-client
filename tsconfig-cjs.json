@@ -2,7 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "ESNext",
-    "moduleResolution": "node",
+    // The actual CJS emit is done by rollup; this tsconfig only needs
+    // to type-check, so `bundler` resolution matches the ESM config
+    // and avoids the TS 7 deprecation warning on `node` (= node10).
+    "moduleResolution": "bundler",
     "outDir": "dist/cjs",
     "tsBuildInfoFile": "dist/cjs/.tsbuildinfo",
     "esModuleInterop": true,
