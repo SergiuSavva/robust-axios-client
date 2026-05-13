@@ -30,7 +30,7 @@ export { ConsoleLogger } from './utils/logger';
 export { LRUCache } from './utils/lru-cache';
 
 // Export constants
-export { DEFAULT_RETRY_CONFIG } from './constants';
+export { DEFAULT_RETRY_CONFIG, DEFAULT_TIMEOUT_MS } from './constants';
 
 // Create and export RobustAxios as the default export (for backward compatibility)
 const RobustAxios = RobustAxiosFactory;
