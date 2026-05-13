@@ -462,13 +462,26 @@ export class RobustAxiosClient {
   // Retry and Backoff Strategy Methods
   //--------------------------------------------------------------------------
   private calculateRetryDelay(context: RetryContext, error: AxiosError): number {
+    // Honor the server's Retry-After hint first, regardless of the
+    // configured backoff strategy. The server is the authority on
+    // when it wants to be called again.
+    const retryAfterMs = this.parseRetryAfter(error.response?.headers?.['retry-after']);
+    if (retryAfterMs !== null) {
+      return retryAfterMs;
+    }
+
     const categorySettings = this.getCategorySettings(context.category);
     const backoffStrategy = categorySettings?.backoffStrategy ?? this.retryConfig.backoffStrategy;
     const customBackoff = categorySettings?.customBackoff ?? this.retryConfig.customBackoff;
 
     switch (backoffStrategy) {
-      case 'exponential':
-        return Math.pow(2, context.retryCount) * 1000;
+      case 'exponential': {
+        // Equal-jitter exponential backoff (AWS-style): half deterministic,
+        // half random. Smooths thundering-herd retries without unbounded
+        // best-case latency.
+        const base = Math.pow(2, context.retryCount) * 1000;
+        return base / 2 + Math.random() * (base / 2);
+      }
       case 'linear':
         return context.retryCount * 1000;
       case 'fibonacci':
@@ -479,6 +492,37 @@ export class RobustAxiosClient {
       default:
         return 1000;
     }
+  }
+
+  /**
+   * Parse an HTTP `Retry-After` header value into a delay in milliseconds.
+   * Returns null if the header is absent or unparseable. Supports both:
+   *   - delta-seconds (`Retry-After: 120`)
+   *   - HTTP-date     (`Retry-After: Wed, 21 Oct 2026 07:28:00 GMT`)
+   */
+  private parseRetryAfter(value: unknown): number | null {
+    if (value === undefined || value === null) return null;
+    const str = String(value).trim();
+    if (str === '') return null;
+
+    // delta-seconds form. A purely numeric value is taken as seconds;
+    // a negative or non-finite numeric is invalid (don't fall through
+    // to the date parser, which would happily accept "-5" as a year).
+    if (/^-?\d+(\.\d+)?$/.test(str)) {
+      const seconds = Number(str);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.floor(seconds * 1000);
+      }
+      return null;
+    }
+
+    // HTTP-date form.
+    const epoch = Date.parse(str);
+    if (Number.isFinite(epoch)) {
+      return Math.max(0, epoch - Date.now());
+    }
+
+    return null;
   }
 
   private calculateFibonacciDelay(n: number): number {
