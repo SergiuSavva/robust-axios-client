@@ -1,6 +1,5 @@
 import { CircuitBreakerState, RetryConfig } from '../types';
 
-// Circuit breaker implementation
 export class CircuitBreaker {
   private state: CircuitBreakerState = 'CLOSED';
   private failures: number = 0;
@@ -20,8 +19,7 @@ export class CircuitBreaker {
       case 'OPEN':
         if (Date.now() - this.lastStateChange >= this.config.resetTimeout) {
           this.transitionTo('HALF_OPEN');
-          this.requestCount = 0; // Reset request count when entering HALF_OPEN
-          this.successCount = 0; // Reset success count when entering HALF_OPEN
+          this.requestCount = 1;
           return true;
         }
         return false;
@@ -37,30 +35,45 @@ export class CircuitBreaker {
   }
 
   recordSuccess() {
-    if (this.state === 'HALF_OPEN') {
-      this.successCount++;
-      // Only transition to CLOSED after all test requests have succeeded
-      if (this.successCount >= this.config.halfOpenMaxRequests) {
-        this.transitionTo('CLOSED');
-        this.requestCount = 0; // Reset counters when transitioning to CLOSED
-        this.successCount = 0;
-      }
+    switch (this.state) {
+      case 'CLOSED':
+        this.failures = 0;
+        break;
+      case 'HALF_OPEN':
+        this.successCount++;
+        if (this.successCount >= this.config.halfOpenMaxRequests) {
+          this.transitionTo('CLOSED');
+        }
+        break;
     }
-    this.failures = 0;
   }
 
   recordFailure() {
-    this.failures++;
-    if (this.failures >= this.config.failureThreshold) {
-      this.transitionTo('OPEN');
-      this.requestCount = 0; // Reset counters when opening circuit
-      this.successCount = 0;
+    switch (this.state) {
+      case 'CLOSED':
+        this.failures++;
+        if (this.failures >= this.config.failureThreshold) {
+          this.transitionTo('OPEN');
+        }
+        break;
+      case 'HALF_OPEN':
+        // Single failure in HALF_OPEN reverts immediately to OPEN
+        // without waiting for the global failure threshold.
+        this.transitionTo('OPEN');
+        break;
     }
+  }
+
+  getState(): CircuitBreakerState {
+    return this.state;
   }
 
   private transitionTo(newState: CircuitBreakerState) {
     this.state = newState;
     this.lastStateChange = Date.now();
+    this.failures = 0;
+    this.requestCount = 0;
+    this.successCount = 0;
     this.onStateChange?.(newState);
   }
 }
