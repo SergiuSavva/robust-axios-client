@@ -35,7 +35,9 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
     }
     return Math.pow(2, retryCount) * 1000;
   },
-  timeoutStrategy: 'decay',
+  // 'grow' is the canonical name; 'decay' is kept as a deprecated
+  // alias for backward compatibility.
+  timeoutStrategy: 'grow',
   timeoutMultiplier: 1.5,
   circuitBreaker: {
     failureThreshold: 5,

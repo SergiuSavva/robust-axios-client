@@ -31,8 +31,15 @@ export interface RetryConfig {
   retryCondition?: (error: AxiosError) => boolean | Promise<boolean>;
   retryDelay?: (retryCount: number, error: AxiosError) => number;
 
-  // Enhanced timeout handling
-  timeoutStrategy?: 'reset' | 'decay' | 'fixed';
+  // Enhanced timeout handling.
+  //   - 'reset': use the original timeout on every attempt.
+  //   - 'grow':  multiply the timeout by `timeoutMultiplier` each retry.
+  //              Useful when a slow upstream needs more breathing room.
+  //   - 'fixed': alias of 'reset'; kept for backward compatibility.
+  //   - 'decay': DEPRECATED alias of 'grow'. The name was wrong: the
+  //              implementation grows the timeout, it does not shrink
+  //              it. Will be removed in a future major version.
+  timeoutStrategy?: 'reset' | 'grow' | 'fixed' | 'decay';
   timeoutMultiplier?: number;
 
   // Circuit breaker settings

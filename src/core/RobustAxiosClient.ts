@@ -548,6 +548,10 @@ export class RobustAxiosClient {
     switch (this.retryConfig.timeoutStrategy) {
       case 'reset':
         return currentTimeout;
+      // 'decay' is the deprecated alias of 'grow'. The original name was
+      // a misnomer (the math grows the timeout); kept as an alias so
+      // existing configs keep working.
+      case 'grow':
       case 'decay':
         return currentTimeout * Math.pow(this.retryConfig.timeoutMultiplier, retryCount);
       case 'fixed':
