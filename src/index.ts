@@ -32,11 +32,11 @@ export { LRUCache } from './utils/lru-cache';
 // Export constants
 export { DEFAULT_RETRY_CONFIG, DEFAULT_TIMEOUT_MS } from './constants';
 
-// Create and export RobustAxios as the default export (for backward compatibility)
+// Default export. The factory's static HTTP methods (`RobustAxios.get(...)`
+// etc.) lazily create the default instance on first call, so importing
+// this module has no side effects -- which keeps `"sideEffects": false`
+// honest and lets bundlers tree-shake the factory away for users who
+// only need `RobustAxios.create(...)`.
 const RobustAxios = RobustAxiosFactory;
 
-// Initialize default instance (don't need to store reference as it's managed by the factory)
-RobustAxiosFactory.getDefaultInstance();
-
-// Export default instance and factory
 export default RobustAxios;
