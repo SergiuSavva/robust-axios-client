@@ -589,7 +589,7 @@ export class RobustAxiosClient {
             if (validationDetails) {
               return new ValidationError(`Validation failed: ${JSON.stringify(validationDetails)}`);
             }
-          } catch (e) {
+          } catch {
             // Ignore JSON parsing errors
           }
           return new ValidationError(error.message);
