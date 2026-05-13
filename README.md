@@ -113,8 +113,8 @@ const api = RobustAxios.create({
     retryCondition: (err) => boolean,     // override the idempotency-aware default
     retryDelay: (n, err) => milliseconds, // override the default delay function
 
-    timeoutStrategy: 'decay',   // 'reset' | 'decay' | 'fixed' — applied between attempts
-    timeoutMultiplier: 1.5,
+    timeoutStrategy: 'grow',    // 'reset' | 'grow' | 'fixed' — applied between attempts
+    timeoutMultiplier: 1.5,     // (`'decay'` is a deprecated alias of `'grow'`)
 
     circuitBreaker: {
       failureThreshold: 5,
